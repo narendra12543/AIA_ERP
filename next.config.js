@@ -2,6 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    serverComponentsExternalPackages: ["puppeteer-core", "@sparticuz/chromium"],
+    outputFileTracingIncludes: {
+      "/api/export-pdf": ["./node_modules/@sparticuz/chromium/**/*"],
+    },
+  },
   async headers() {
     return [
       {

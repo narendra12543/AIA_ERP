@@ -4,7 +4,7 @@ import path from "path";
 import { authenticateRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Extend Vercel serverless function execution limit up to 60 seconds
+export const maxDuration = 60; // Vercel serverless execution timeout (Pro plan supports up to 300s)
 
 /**
  * Replace relative public asset URLs (e.g. /assets/logo.png) with inline Base64 data URLs
@@ -22,7 +22,7 @@ function inlineAssetsInHtml(html: string): string {
   return html.replace(/src=["'](?:https?:\/\/[^\/]+)?\/?(assets\/[^"']+)["']/gi, (match, assetPath) => {
     try {
       const cleanPath = (assetPath.startsWith("/") ? assetPath.slice(1) : assetPath).split("?")[0];
-      
+
       for (const baseDir of publicDirs) {
         const fullPath = path.join(baseDir, cleanPath);
         if (fs.existsSync(fullPath)) {
@@ -43,28 +43,35 @@ function inlineAssetsInHtml(html: string): string {
 }
 
 /**
- * Resolve Chromium Executable Path across environments:
+ * Resolve Chromium Launch Configuration across environments:
  * 1. Explicit CHROME_PATH environment variable override.
- * 2. Windows local development (Chrome / Edge).
- * 3. Linux VPS / Docker container (/usr/bin/google-chrome, /usr/bin/chromium).
- * 4. Vercel Serverless / AWS Lambda via @sparticuz/chromium dynamic import (if installed).
+ * 2. Windows local development (Google Chrome / Microsoft Edge).
+ * 3. Vercel Serverless / AWS Lambda via @sparticuz/chromium.
+ * 4. Linux VPS / Docker Container (/usr/bin/google-chrome, /usr/bin/chromium).
  */
-async function resolveChromiumExecutable(): Promise<{ executablePath: string; args: string[] }> {
-  // 1. Explicit environment variable
+async function resolveChromiumLaunchConfig(): Promise<{
+  executablePath: string;
+  args: string[];
+  headless: boolean | "shell";
+}> {
+  const defaultArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--font-render-hinting=none",
+  ];
+
+  // 1. Explicit environment variable override
   if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
     return {
       executablePath: process.env.CHROME_PATH,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--font-render-hinting=none",
-      ],
+      args: defaultArgs,
+      headless: true,
     };
   }
 
-  // 2. Windows Development
+  // 2. Windows Local Development
   if (process.platform === "win32") {
     const winPaths = [
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -76,63 +83,49 @@ async function resolveChromiumExecutable(): Promise<{ executablePath: string; ar
       if (fs.existsSync(p)) {
         return {
           executablePath: p,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--font-render-hinting=none",
-          ],
+          args: defaultArgs,
+          headless: true,
         };
       }
     }
   }
 
-  // 3. Linux VPS / Docker Container system binaries
-  const linuxPaths = [
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ];
-  for (const p of linuxPaths) {
-    if (fs.existsSync(p)) {
+  // 3. Linux VPS / Docker Container system binaries (when not running in Vercel/Lambda)
+  if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const linuxPaths = [
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    ];
+    for (const p of linuxPaths) {
+      if (fs.existsSync(p)) {
+        return {
+          executablePath: p,
+          args: defaultArgs,
+          headless: true,
+        };
+      }
+    }
+  }
+
+  // 4. Vercel Serverless / AWS Lambda Runtime via @sparticuz/chromium
+  try {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    chromium.setGraphicsMode = false; // Faster cold start; swiftshader not needed for HTML/CSS vector PDFs
+    const execPath = await chromium.executablePath();
+    if (execPath) {
       return {
-        executablePath: p,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--font-render-hinting=none",
-        ],
+        executablePath: execPath,
+        args: chromium.args,
+        headless: "shell",
       };
     }
+  } catch (serverlessErr: any) {
+    console.error("Failed to initialize @sparticuz/chromium:", serverlessErr?.message || serverlessErr);
   }
 
-  // 4. Serverless Runtime (Vercel / AWS Lambda) - safely loaded if present without breaking Webpack
-  try {
-    const dynamicRequire = eval("require");
-    const chromium = dynamicRequire("@sparticuz/chromium");
-    if (chromium) {
-      const execPath = await chromium.executablePath();
-      if (execPath) {
-        return {
-          executablePath: execPath,
-          args: chromium.args || [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-          ],
-        };
-      }
-    }
-  } catch (serverlessErr) {
-    // Package not installed on host or running in local development
-  }
-
-  return { executablePath: "", args: [] };
+  return { executablePath: "", args: [], headless: true };
 }
 
 export async function POST(req: NextRequest) {
@@ -162,38 +155,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "puppeteer-core module not available" }, { status: 501 });
     }
 
-    const { executablePath, args } = await resolveChromiumExecutable();
+    const launchConfig = await resolveChromiumLaunchConfig();
 
-    if (!executablePath) {
+    if (!launchConfig.executablePath) {
       return NextResponse.json(
         {
           error: "Chromium binary not found on runtime host.",
           details:
             process.platform === "win32"
               ? "Ensure Google Chrome or Microsoft Edge is installed in default system directories."
-              : "For Linux VPS/Docker: install 'google-chrome-stable'. For Vercel Serverless: install '@sparticuz/chromium-min' or configure external microservice.",
+              : "Serverless @sparticuz/chromium failed to resolve executablePath, and no system Chrome binary was found.",
           code: "CHROMIUM_BINARY_MISSING",
         },
-        { status: 501 }
+        { status: 503 }
       );
     }
 
     browser = await puppeteer.launch({
-      executablePath,
-      headless: true,
-      args,
+      executablePath: launchConfig.executablePath,
+      headless: launchConfig.headless,
+      args: launchConfig.args,
     });
 
     const page = await browser.newPage();
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
     await page.setContent(inlinedHtml, { waitUntil: ["domcontentloaded", "load"], timeout: 25000 });
-    
+
     if (fileName) {
       await page.evaluate((title: string) => {
         document.title = title;
       }, fileName);
     }
-    
+
     // Ensure all images are loaded completely before PDF capture
     await page.evaluate(async () => {
       const imgs = Array.from(document.querySelectorAll("img"));

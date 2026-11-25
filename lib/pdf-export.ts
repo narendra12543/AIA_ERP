@@ -274,19 +274,22 @@ export async function exportElementsToPdf({
       }
     } else {
       const errData = await apiRes.json().catch(() => ({}));
-      const errMsg = errData.error || `Server export error (${apiRes.status})`;
-      console.warn("Chromium PDF export endpoint responded with error:", errMsg);
-      if (onProgress) onProgress(`Export error: ${errMsg}`);
+      const errMsg = errData.error || `Server PDF export error (${apiRes.status})`;
+      console.error("Chromium PDF export endpoint responded with error:", errMsg);
+      if (onProgress) onProgress(`PDF Export Failed: ${errMsg}`);
+      if (typeof window !== "undefined") {
+        window.alert(`Server PDF Generation Failed: ${errMsg}`);
+      }
+      return false;
     }
-  } catch (apiErr) {
-    console.warn("Native Chromium API export network error:", apiErr);
-  }
-
-  // Fallback: If server PDF export encounters an environment limitation, prompt direct high-fidelity print
-  if (typeof window !== "undefined") {
-    if (onProgress) onProgress("Opening Native Print dialog...");
-    window.print();
-    return true;
+  } catch (apiErr: any) {
+    const errMsg = apiErr?.message || "Network error during PDF generation";
+    console.error("Native Chromium API export error:", errMsg);
+    if (onProgress) onProgress(`PDF Export Failed: ${errMsg}`);
+    if (typeof window !== "undefined") {
+      window.alert(`PDF Export Failed: ${errMsg}`);
+    }
+    return false;
   }
 
   return false;
