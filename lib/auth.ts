@@ -147,14 +147,19 @@ export async function createSession(user: User): Promise<SessionData> {
   };
   activeSessions.set(token, sessionData);
 
-  // Store in PostgreSQL if configured
+  // Store in PostgreSQL (mandatory in production for cross-instance verification)
   try {
     await query(
       `INSERT INTO sessions (id, user_id, role, token, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
       [sessionId, user.id, user.role, token, expiresAt.toISOString()]
     );
-  } catch (e) {}
+  } catch (e: any) {
+    console.error("Failed to persist session in PostgreSQL:", e?.message || e);
+    if (isProduction) {
+      throw new Error("Unable to persist authenticated session to database.");
+    }
+  }
 
   // Audit log
   await logAudit(user.id, "LOGIN_SUCCESS", { role: user.role, email: user.email });
@@ -252,8 +257,8 @@ export async function authenticateRequest(
   requiredRole?: "Admin" | "User"
 ): Promise<{ user: SessionData } | { error: string; status: number }> {
   const token =
-    req.cookies.get("aven_session")?.value ||
     req.headers.get("x-tab-session") ||
+    req.cookies.get("aven_session")?.value ||
     req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
   if (!token) {

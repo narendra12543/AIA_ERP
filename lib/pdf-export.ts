@@ -239,7 +239,33 @@ export async function exportElementsToPdf({
     return false;
   }
 
-  // 1. Try Native Chromium Vector PDF Engine
+  // Prompt user for save location IMMEDIATELY while the click user-gesture is still active
+  // (Calling showSaveFilePicker after an async network fetch expires transient user activation in Chrome/Edge)
+  let preSelectedHandle: any = null;
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      preSelectedHandle = await (window as any).showSaveFilePicker({
+        suggestedName: fileName,
+        types: [
+          {
+            description: "PDF Document (*.pdf)",
+            accept: {
+              "application/pdf": [".pdf"],
+            },
+          },
+        ],
+      });
+    } catch (pickerErr: any) {
+      if (pickerErr?.name === "AbortError") {
+        if (onProgress) onProgress("");
+        return false;
+      }
+      // SecurityError (e.g. headless/scripted click without user activation) -> fallback to blob download after generation
+      console.warn("Save picker skipped:", pickerErr?.message || pickerErr);
+    }
+  }
+
+  // 1. Native Chromium Vector PDF Engine
   try {
     if (onProgress) onProgress("Generating Native Chromium Vector PDF...");
     const fullHtml = await buildStandaloneDocumentHtml(validElements, fileName);
@@ -250,7 +276,7 @@ export async function exportElementsToPdf({
         const tabSessionRaw = sessionStorage.getItem("aven_tab_session");
         if (tabSessionRaw) {
           const tabSession = JSON.parse(tabSessionRaw);
-          if (tabSession.token) {
+          if (tabSession?.token) {
             headers["x-tab-session"] = tabSession.token;
           }
         }
@@ -259,6 +285,7 @@ export async function exportElementsToPdf({
 
     const apiRes = await fetch("/api/export-pdf", {
       method: "POST",
+      credentials: "same-origin",
       headers,
       body: JSON.stringify({ html: fullHtml, fileName }),
     });
@@ -270,7 +297,7 @@ export async function exportElementsToPdf({
           (window as any).__lastExportedPdfBlob = pdfBlob;
         }
         if (onProgress) onProgress("Saving Native Vector PDF...");
-        return await saveBlobToFile(pdfBlob, fileName, onProgress);
+        return await saveBlobToFile(pdfBlob, fileName, onProgress, preSelectedHandle);
       }
     } else {
       const errData = await apiRes.json().catch(() => ({}));
@@ -296,16 +323,29 @@ export async function exportElementsToPdf({
 }
 
 /**
- * Universal file saver supporting File System Access API and browser download
+ * Universal file saver supporting pre-selected File System Access handle and browser download
  */
 async function saveBlobToFile(
   pdfBlob: Blob,
   fileName: string,
-  onProgress?: (status: string) => void
+  onProgress?: (status: string) => void,
+  preSelectedHandle?: any
 ): Promise<boolean> {
-  // 1. Try File System Access API (showSaveFilePicker)
-  // Allows user to pick exact save location (e.g. OneDrive, Desktop) with suggested filename
-  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+  // 1. Write to pre-selected Save As handle (if user chose location upfront)
+  if (preSelectedHandle) {
+    try {
+      const writable = await preSelectedHandle.createWritable();
+      await writable.write(pdfBlob);
+      await writable.close();
+      if (onProgress) onProgress("Saved successfully!");
+      return true;
+    } catch (err: any) {
+      console.warn("Writing to pre-selected file handle failed:", err);
+    }
+  }
+
+  // 2. Fallback: Try showSaveFilePicker if not already attempted
+  if (!preSelectedHandle && typeof window !== "undefined" && "showSaveFilePicker" in window) {
     try {
       const handle = await (window as any).showSaveFilePicker({
         suggestedName: fileName,
@@ -334,7 +374,7 @@ async function saveBlobToFile(
     }
   }
 
-  // 2. Fallback: Browser direct file download
+  // 3. Browser direct file download fallback (when File System Access API is unavailable)
   const blobUrl = URL.createObjectURL(pdfBlob);
   const link = document.createElement("a");
   link.href = blobUrl;
