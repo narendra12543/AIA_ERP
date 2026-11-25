@@ -1,0 +1,350 @@
+[
+  {
+    "id": "prof_2",
+    "name": "Motorised Sliding Gate",
+    "product": "Motorised Sliding Gate",
+    "specs": {
+      "Profile Name": "Motorised Sliding Gate",
+      "Product": "Motorised Sliding Gate",
+      "Motor Specification": "Power:400W, Voltage:230VAC",
+      "Opening/Closing Speed": "12 m/Min",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "230VAC",
+      "Limit Switch": "Magnetic",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Opening Direction": "Horizontal",
+      "Design": "Standard and as per client requirement",
+      "Frame Material": "Mild Steel (MS)",
+      "Drive": "Single Phase",
+      "Usage Type": "Industrial",
+      "Limit Switch Type": "Precise",
+      "Remote Control": "Included",
+      "Emergency / Power Failure": "Manual release by key",
+      "Protection": "IP54",
+      "Opening Frequency": "100 Cycles/day",
+      "3 Way Push Button": "Included",
+      "Safety Features": "Safety photocell, Precise limit switch,  Flashing lamp with alarm",
+      "AGO70 Photocell Sensor": "Included"
+    }
+  },
+  {
+    "id": "prof_3",
+    "name": "Manual Sliding Gate",
+    "product": "Manual Sliding Gate",
+    "specs": {
+      "Profile Name": "Manual Sliding Gate",
+      "Product": "Manual Sliding Gate",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Opening Direction": "Horizontal",
+      "Max Width": "As per client requirement",
+      "Max Height": "As per client requirement",
+      "Design": "Standard and as per client requirement",
+      "Height": "As per client requirement",
+      "Length": "As per client requirement",
+      "Usage Type": "Industrial",
+      "Column": "Heavy column with, Nylon roller",
+      "Bottom": "Heavy wheel with double bearing"
+    }
+  },
+  {
+    "id": "prof_4",
+    "name": "Fabric Foldup Shutter (Door)",
+    "product": "Fabric Foldup Shutter (Door)",
+    "specs": {
+      "Profile Name": "Fabric Foldup Shutter (Door)",
+      "Product": "Fabric Foldup Shutter (Door)",
+      "Motor Specification": "Power:2.2kw, Voltage:220VAC, Sytco Make",
+      "Opening/Closing Speed": "12 m/Min",
+      "Drive Unit": "Direct drive operator with Electromagnetic brake, Right-hand side as standard",
+      "Motor Power": "Input: 220VAC, 50Hz",
+      "Limit Switch": "Encoder (Electronic limit switch)",
+      "Safety Devices": "1 Pair of Safety Sensor (Photocell)",
+      "Release System for Manual": "Crank Handle",
+      "Actuation (Operating)": "Push Button. OPTIONAL: Pull cord switch / Radar sensor / Loop detector / Remote",
+      "Bottom Profile": "Soft edge bottom",
+      "Curtain": "Fabric Temperature Resistance -40 to +70 degree C",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Usage Type": "Industrial"
+    }
+  },
+  {
+    "id": "prof_5",
+    "name": "Manual Sliding Gate Converted into Motorised Sliding Gate",
+    "product": "Manual Sliding Gate Converted into Motorised Sliding Gate",
+    "specs": {
+      "Profile Name": "Manual Sliding Gate Converted into Motorised Sliding Gate",
+      "Product": "Manual Sliding Gate Converted into Motorised Sliding Gate",
+      "Motor Specification": "Power:400W, Voltage:230VAC",
+      "Opening/Closing Speed": "12 m/Min",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "230VAC",
+      "Drive": "Single Phase",
+      "Usage Type": "Industrial",
+      "Limit Switch Type": "Magnetic",
+      "Remote Control": "Included",
+      "Emergency / Power Failure": "Manual release by key",
+      "Protection": "IP54",
+      "Opening Frequency": "50 Cycles/day",
+      "3 Way Push Button": "Included",
+      "Safety Features": "Safety photocell, Precise limit switch,  Flashing lamp with alarm",
+      "AGO70 Photocell Sensor": "Included"
+    }
+  },
+  {
+    "id": "prof_6",
+    "name": "Incline Belt Conveyor",
+    "product": "Incline Belt Conveyor",
+    "specs": {
+      "Profile Name": "Incline Belt Conveyor",
+      "Product": "Incline Belt Conveyor",
+      "Drive Unit": "Direct drive",
+      "Opening Direction": "Incline",
+      "Design": "Standard and as per client requirement",
+      "Frame Material": "Stainless Steel (SS)",
+      "Drive": "Single Phase",
+      "Conveyor Direction": "Incline",
+      "Speed Control": "Fixed speed",
+      "Usage Type": "Industrial",
+      "Belt": "2 Ply 1.5mm PU Endless Belt \nWith T 50-Cleat @ Pitch of 200mm Cleat Length length 50mm"
+    }
+  },
+  {
+    "id": "prof_7",
+    "name": "Inclined Belt Conveyor with Horizontal Discharge",
+    "product": "Inclined Belt Conveyor with Horizontal Discharge",
+    "specs": {
+      "Profile Name": "Inclined Belt Conveyor with Horizontal Discharge",
+      "Product": "Inclined Belt Conveyor with Horizontal Discharge",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "1.5 HP",
+      "Frame Material": "Mild Steel (MS)",
+      "Drive": "Single Phase",
+      "Conveyor Direction": "Incline + Horizontal",
+      "Width": "600MM",
+      "Length": "Incline Length \u2013 3200 mm | Horizontal Length \u2013 1000 mm",
+      "Speed Control": "Fixed speed (10mtr /min)",
+      "Usage Type": "Industrial",
+      "Belt": "PVC Belt With Cleat"
+    }
+  },
+  {
+    "id": "prof_8",
+    "name": "Horizontal Belt Conveyor",
+    "product": "Horizontal Belt Conveyor",
+    "specs": {
+      "Profile Name": "Horizontal Belt Conveyor",
+      "Product": "Horizontal Belt Conveyor",
+      "Drive Unit": "Direct drive",
+      "Design": "Standard and as per client requirement",
+      "Frame Material": "Mild Steel (MS)",
+      "Conveyor Direction": "Horizontal",
+      "Speed Control": "Fixed speed",
+      "Usage Type": "Industrial",
+      "Belt": "2 Ply 3mm PVC Endless Belt.\nGreen Colour \nSuitable Temperature 60\u00b0",
+      "Emergency / Power Failure": "Included"
+    }
+  },
+  {
+    "id": "prof_9",
+    "name": "Motorised safety sliding door",
+    "product": "Motorised safety sliding door",
+    "specs": {
+      "Profile Name": "Motorised safety sliding door",
+      "Product": "Motorised safety sliding door",
+      "Motor Specification": "Power:400W, Voltage:230VAC",
+      "Opening/Closing Speed": "12 m/Min",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "230VAC",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Opening Direction": "Horizontal",
+      "Max Width": "As per client requirement",
+      "Max Height": "As per client requirement",
+      "Design": "Standard and as per client requirement",
+      "Drive": "Single Phase",
+      "Height": "1.5 mtr",
+      "Length": "3 mtr",
+      "Usage Type": "Industrial",
+      "Limit Switch Type": "Magnetic",
+      "Remote Control": "Included",
+      "Emergency / Power Failure": "Manual release by key",
+      "Protection": "IP54",
+      "Opening Frequency": "50 Cycles/day",
+      "3 Way Push Button": "Included",
+      "Safety Features": "Safety photocell, Precise limit switch,  Flashing lamp with alarm(Extra)",
+      "Column": "Heavy column with, Nylon roller",
+      "Bottom": "Heavy wheel with double bearing",
+      "AGO70 Photocell Sensor": "Included"
+    }
+  },
+  {
+    "id": "prof_10",
+    "name": "Motorised Telescopic Gate",
+    "product": "Motorised Telescopic Gate",
+    "specs": {
+      "Profile Name": "Motorised Telescopic Gate",
+      "Product": "Motorised Telescopic Gate",
+      "Motor Specification": "Power:400W, Voltage:230VAC",
+      "Opening/Closing Speed": "12 m/Min",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "230VAC",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Opening Direction": "Horizontal",
+      "Max Width": "As per client requirement",
+      "Max Height": "As per client requirement",
+      "Design": "Standard and as per client requirement",
+      "Drive": "Single Phase",
+      "Height": "1.6 mtr",
+      "Length": "5.2 mtr",
+      "Usage Type": "Industrial",
+      "Limit Switch Type": "Magnetic",
+      "Remote Control": "Included",
+      "Emergency / Power Failure": "Manual release by key",
+      "Protection": "IP55",
+      "Opening Frequency": "51 Cycles/day",
+      "3 Way Push Button": "Included",
+      "Safety Features": "Safety photocell, Precise limit switch,  Flashing lamp with alarm(Extra)",
+      "Column": "Heavy column with, Nylon roller",
+      "Bottom": "Heavy wheel with double bearing",
+      "AGO70 Photocell Sensor": "Included"
+    }
+  },
+  {
+    "id": "prof_11",
+    "name": "Motorised safety sliding gate",
+    "product": "Motorised safety sliding gate",
+    "specs": {
+      "Profile Name": "Motorised safety sliding gate",
+      "Product": "Motorised safety sliding gate",
+      "Motor Specification": "Power:400W, Voltage:230VAC",
+      "Opening/Closing Speed": "14 m/Min",
+      "Drive Unit": "Direct drive",
+      "Motor Power": "230VAC",
+      "Mounting Surface": "Concrete / Wall, Steel construction",
+      "Opening Direction": "Horizontal",
+      "Max Width": "As per client requirement",
+      "Max Height": "As per client requirement",
+      "Design": "Standard and as per client requirement",
+      "Drive": "Single Phase",
+      "Height": "1.5 mtr",
+      "Length": "5 mtr",
+      "Usage Type": "Industrial",
+      "Limit Switch Type": "Magnetic",
+      "Remote Control": "Included",
+      "Emergency / Power Failure": "Manual release by key",
+      "Protection": "IP56",
+      "Opening Frequency": "52 Cycles/day",
+      "3 Way Push Button": "Included",
+      "Safety Features": "Safety photocell, Precise limit switch,  Flashing lamp with alarm(Extra)",
+      "Column": "Heavy column with, Nylon roller",
+      "Bottom": "Heavy wheel with double bearing",
+      "AGO70 Photocell Sensor": "Included"
+    }
+  },
+  {
+    "id": "prof_13",
+    "name": "Parking Boom Barrier",
+    "product": "Parking Boom Barrier",
+    "specs": {
+      "Profile Name": "Parking Boom Barrier",
+      "Product": "Parking Boom Barrier",
+      "Motor Specification": "24V DC Brushless Motor",
+      "Opening/Closing Speed": "2.5 Sec",
+      "Motor Power": "24V DC",
+      "Safety Devices": "Boom Rest",
+      "Actuation (Operating)": "Push Button + 2 Remote Controls",
+      "Max Width": "Up to 6 mtr",
+      "Design": "Telescopic Boom",
+      "Length": "Up to 6 mtr",
+      "Usage Type": "Parking / Access Control",
+      "Remote Control": "Included",
+      "3 Way Push Button": "Included"
+    }
+  },
+  {
+    "id": "prof_14",
+    "name": "RFID Reader \u2013 15 Mtr Range",
+    "product": "RFID Reader \u2013 15 Mtr Range",
+    "specs": {
+      "Profile Name": "RFID Reader \u2013 15 Mtr Range",
+      "Product": "RFID Reader \u2013 15 Mtr Range",
+      "Motor Specification": "Frequency: 865\u2013868MHz / 902\u2013928MHz",
+      "Max Width": "15 Mtr* Range",
+      "Usage Type": "Access Control",
+      "Safety Features": "Indication LED"
+    }
+  },
+  {
+    "id": "prof_15",
+    "name": "Access Controller",
+    "product": "Access Controller",
+    "specs": {
+      "Profile Name": "Access Controller",
+      "Product": "Access Controller",
+      "Motor Specification": "Communication: LAN",
+      "Actuation (Operating)": "Wiegand 26/34",
+      "Max Width": "1 Door / 2 Reader",
+      "Usage Type": "Access Control",
+      "Safety Features": "Camera Integration Supported"
+    }
+  },
+  {
+    "id": "prof_16",
+    "name": "RFID Tag",
+    "product": "RFID Tag",
+    "specs": {
+      "Product": "RFID Tag",
+      "Usage Type": "Access Control"
+    }
+  },
+  {
+    "id": "prof_17",
+    "name": "RFID Pole",
+    "product": "RFID Pole",
+    "specs": {
+      "Profile Name": "RFID Pole",
+      "Product": "RFID Pole",
+      "Usage Type": "Access Control"
+    }
+  },
+  {
+    "id": "prof_18",
+    "name": "Safety Loop",
+    "product": "Safety Loop",
+    "specs": {
+      "Profile Name": "Safety Loop",
+      "Product": "Safety Loop",
+      "Motor Specification": "Power Supply: AC 110/220V \u00b110%, 50/60Hz; DC 12/24V",
+      "Max Width": "Loop Size: 8M \u00d7 1M",
+      "Length": "8M \u00d7 1M",
+      "Usage Type": "Access Control / Vehicle Detection",
+      "Protection": "-20\u00b0C to +65\u00b0C",
+      "Safety Features": "Adjustable Sensitivity \u2013 4 Levels, Response Time 10ms"
+    }
+  },
+  {
+    "id": "prof_19",
+    "name": "Installation / Integration / Utility Setup / Training",
+    "product": "Installation Service",
+    "specs": {
+      "Profile Name": "Installation / Integration / Utility Setup / Training",
+      "Product": "Installation Service",
+      "Actuation (Operating)": "Installation, Integration, Utility Setup & Training",
+      "Usage Type": "Industrial / Commercial"
+    }
+  },
+  {
+    "id": "prof_20",
+    "name": "Motorized rolling shutter",
+    "product": "Motorized rolling shutter",
+    "specs": {
+      "Profile Name": "Motorized rolling shutter",
+      "Product": "Motorized rolling shutter",
+      "Motor Specification": "230V Single Phase (50 Hz)",
+      "Opening/Closing Speed": "0.05 m/sec to 0.1 m/sec",
+      "Safety Devices": "Built-in thermal/overload protection, safety brake system, auto-stop limit switches.",
+      "Max Width": "As per requirement",
+      "Usage Type": "Industrial / Commercial",
+      "Protection": "IP54"
+    }
+  }
+]

@@ -1,0 +1,4 @@
+# AVEN INDUSTRIAL AUTOMATION ERP — ROBOTS EXCLUSION STANDARD
+# Strictly disallow all search engines from indexing private ERP records, quotations, and invoices
+User-agent: *
+Disallow: /
