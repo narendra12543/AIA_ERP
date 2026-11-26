@@ -204,17 +204,30 @@ export async function POST(req: NextRequest) {
 
     await page.evaluateHandle("document.fonts.ready");
 
-    const pdfBuffer = await page.pdf({
+    const pdfRaw = await page.pdf({
       format: "A4",
       printBackground: true,
       preferCSSPageSize: true,
       margin: { top: "0mm", right: "0mm", bottom: "0mm", left: "0mm" },
     });
 
-    return new NextResponse(pdfBuffer, {
+    const pdfBytes = Buffer.from(pdfRaw);
+    const hasPdfHeader = pdfBytes.length > 1000 && pdfBytes.subarray(0, 5).toString("ascii") === "%PDF-";
+    const hasPdfEof = pdfBytes.subarray(Math.max(0, pdfBytes.length - 64)).toString("ascii").includes("%%EOF");
+
+    if (!hasPdfHeader || !hasPdfEof) {
+      console.error("Chromium returned invalid PDF binary:", { length: pdfBytes.length, hasPdfHeader, hasPdfEof });
+      return NextResponse.json(
+        { error: "Generated PDF failed binary integrity validation.", code: "INVALID_PDF_BINARY" },
+        { status: 500 }
+      );
+    }
+
+    return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
+        "Content-Length": String(pdfBytes.length),
         "Content-Disposition": `attachment; filename="${fileName || "document.pdf"}"`,
         "Cache-Control": "no-store, no-cache, must-revalidate",
       },

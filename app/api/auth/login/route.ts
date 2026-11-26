@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query, initDb } from "@/lib/db";
+import { query, initDb, isProduction } from "@/lib/db";
 import { defaultUsers } from "@/lib/sample-data";
 import { User } from "@/lib/types";
 import {
@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
         created_at: row.created_at,
       };
       storedPasswordHash = row.password;
-    } else {
-      // Check default fallback users
+    } else if (!isProduction) {
+      // Development-only offline fallback (strictly disabled in production)
       const fallback = defaultUsers.find((u) => u.email.toLowerCase() === trimmedEmail);
       if (fallback) {
         userRecord = fallback;
@@ -95,36 +95,7 @@ export async function POST(req: NextRequest) {
     // Login Succeeded: Reset rate limit
     await resetLoginAttempts(trimmedEmail);
 
-    // Ensure user exists in PostgreSQL `users` table before creating session (prevents FK violation on `sessions.user_id`)
-    if (!dbRes || dbRes.rows.length === 0) {
-      try {
-        const hashed = storedPasswordHash.includes(":")
-          ? storedPasswordHash
-          : hashPassword(enteredPassword);
-        await query(
-          `INSERT INTO users (id, email, name, role, password, status, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT (email) DO NOTHING`,
-          [
-            userRecord.id,
-            userRecord.email.toLowerCase().trim(),
-            userRecord.name,
-            userRecord.role,
-            hashed,
-            userRecord.status || "active",
-            userRecord.created_at || new Date().toISOString().slice(0, 10),
-          ]
-        );
-        const syncedUser = await query(`SELECT id FROM users WHERE LOWER(email) = $1`, [trimmedEmail]);
-        if (syncedUser && syncedUser.rows.length > 0) {
-          userRecord = { ...userRecord, id: syncedUser.rows[0].id };
-        }
-      } catch (syncErr) {
-        console.warn("User bootstrap sync warning:", syncErr);
-      }
-    }
-
-    // Create session (ADMIN 20 mins, USER 15 mins)
+    // Create session (ADMIN 20 mins, USER 15 mins) — throws in production if PostgreSQL persistence fails
     const session = await createSession(userRecord);
 
     const safeUser = {

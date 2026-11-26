@@ -244,7 +244,7 @@ export default function CommercialOffer({ quote, company }: CommercialOfferProps
         </table>
 
         {/* Description & Amounts Box */}
-        <div style={{ display: "flex", flexDirection: "row", borderBottom: "1px solid #000000", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", flexDirection: "row", boxSizing: "border-box" }}>
           <div style={{ flex: 1, padding: "6px 10px", borderRight: "1px solid #000000", fontSize: "8.5px", lineHeight: 1.35 }}>
             <div style={{ marginBottom: "4px" }}>
               <span style={{ fontWeight: 800, textTransform: "uppercase", fontSize: "8px", color: "#333", display: "block" }}>ESTIMATE AMOUNT IN WORDS</span>
@@ -304,19 +304,19 @@ export default function CommercialOffer({ quote, company }: CommercialOfferProps
             {isIntra ? (
               <>
                 <tr style={{ background: "#ffffff", textAlign: "center", fontWeight: "bold" }}>
-                  <th rowSpan={2} style={{ width: "15%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "15%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     HSN/ SAC
                   </th>
-                  <th rowSpan={2} style={{ width: "21%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "21%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     Taxable amount
                   </th>
-                  <th colSpan={2} style={{ width: "22%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th colSpan={2} style={{ width: "22%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     CGST
                   </th>
-                  <th colSpan={2} style={{ width: "22%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th colSpan={2} style={{ width: "22%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     SGST
                   </th>
-                  <th rowSpan={2} style={{ width: "20%", background: "#ffffff", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "20%", background: "#ffffff", borderTop: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     Total Tax Amount
                   </th>
                 </tr>
@@ -338,16 +338,16 @@ export default function CommercialOffer({ quote, company }: CommercialOfferProps
             ) : (
               <>
                 <tr style={{ background: "#ffffff", textAlign: "center", fontWeight: "bold" }}>
-                  <th rowSpan={2} style={{ width: "16%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "16%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     HSN/ SAC
                   </th>
-                  <th rowSpan={2} style={{ width: "24%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "24%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     Taxable amount
                   </th>
-                  <th colSpan={2} style={{ width: "36%", background: "#ffffff", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th colSpan={2} style={{ width: "36%", background: "#ffffff", borderTop: "1px solid #000000", borderRight: "1px solid #000000", borderBottom: "1px solid #000000", padding: "4px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     IGST
                   </th>
-                  <th rowSpan={2} style={{ width: "24%", background: "#ffffff", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
+                  <th rowSpan={2} style={{ width: "24%", background: "#ffffff", borderTop: "1px solid #000000", borderBottom: "1px solid #000000", padding: "6px 2px", verticalAlign: "middle", textAlign: "center", color: "#000000", fontWeight: "bold", fontSize: "9px" }}>
                     Total Tax Amount
                   </th>
                 </tr>

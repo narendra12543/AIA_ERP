@@ -291,14 +291,45 @@ export async function exportElementsToPdf({
     });
 
     if (apiRes.ok) {
-      const pdfBlob = await apiRes.blob();
-      if (pdfBlob && pdfBlob.size > 1000) {
+      const contentType = (apiRes.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/pdf")) {
+        const errMsg = `Unexpected response type (${contentType || "unknown"}) instead of application/pdf.`;
+        console.error("Invalid PDF response content-type:", errMsg);
+        if (onProgress) onProgress(`PDF Export Failed: ${errMsg}`);
         if (typeof window !== "undefined") {
-          (window as any).__lastExportedPdfBlob = pdfBlob;
+          window.alert(`Server PDF Generation Failed: ${errMsg}`);
         }
-        if (onProgress) onProgress("Saving Native Vector PDF...");
-        return await saveBlobToFile(pdfBlob, fileName, onProgress, preSelectedHandle);
+        return false;
       }
+
+      const arrayBuffer = await apiRes.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      const hasHeader =
+        bytes.length > 1000 &&
+        bytes[0] === 0x25 && // %
+        bytes[1] === 0x50 && // P
+        bytes[2] === 0x44 && // D
+        bytes[3] === 0x46 && // F
+        bytes[4] === 0x2d;   // -
+      const tailText = new TextDecoder("ascii").decode(bytes.subarray(Math.max(0, bytes.length - 64)));
+      const hasEof = tailText.includes("%%EOF");
+
+      if (!hasHeader || !hasEof) {
+        const errMsg = `Received corrupted or truncated PDF binary (${bytes.length} bytes).`;
+        console.error("Client PDF binary validation failed:", { length: bytes.length, hasHeader, hasEof });
+        if (onProgress) onProgress(`PDF Export Failed: ${errMsg}`);
+        if (typeof window !== "undefined") {
+          window.alert(`PDF Export Failed: ${errMsg}`);
+        }
+        return false;
+      }
+
+      const pdfBlob = new Blob([arrayBuffer], { type: "application/pdf" });
+      if (typeof window !== "undefined") {
+        (window as any).__lastExportedPdfBlob = pdfBlob;
+      }
+      if (onProgress) onProgress("Saving Native Vector PDF...");
+      return await saveBlobToFile(pdfBlob, fileName, onProgress, preSelectedHandle);
     } else {
       const errData = await apiRes.json().catch(() => ({}));
       const errMsg = errData.error || `Server PDF export error (${apiRes.status})`;

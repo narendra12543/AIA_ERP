@@ -217,7 +217,6 @@ export default function Page1Technical({
           style={{
             padding: "4px 10px 8px 10px",
             textAlign: "center",
-            background: "#ffffff",
           }}
         >
           <img
@@ -307,7 +306,6 @@ export default function Page1Technical({
                 <tr
                   key={idx}
                   style={{
-                    background: "#ffffff",
                     border: "none",
                   }}
                 >
