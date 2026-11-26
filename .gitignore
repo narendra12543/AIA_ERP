@@ -16,6 +16,7 @@ dist/
 
 # Environment variables & secrets (CRITICAL: NEVER COMMIT)
 .env
+.env.production
 .env*.local
 !.env.example
 *.pem
@@ -35,9 +36,15 @@ Thumbs.db
 backups/
 *.bak
 *.tmp
+*.dump
+*.xlsm
+*.xlsx
 
 # Generated test artifacts & exported PDFs (Do not commit confidential quotes)
 *.pdf
 scripts/*.png
 verified_*.png
 test-artifacts/
+
+.vercel
+.env*

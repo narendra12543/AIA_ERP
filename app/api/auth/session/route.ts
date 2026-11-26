@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySession } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const token =
@@ -21,15 +23,20 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       authenticated: true,
+      mustChangePassword: session.mustChangePassword,
+      passwordExpiresAt: session.passwordExpiresAt || null,
       user: {
         id: session.userId,
         email: session.email,
         name: session.name,
         role: session.role,
+        permissions: session.permissions,
+        must_change_password: session.mustChangePassword,
+        password_expires_at: session.passwordExpiresAt || null,
       },
       expiresAt: session.expiresAt.toISOString(),
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json({ error: "Session validation error" }, { status: 500 });
   }
 }

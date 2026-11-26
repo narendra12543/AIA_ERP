@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Search, Moon, Sun, Bell, User as UserIcon, Menu, Clock } from "lucide-react";
+import { Search, Moon, Sun, Bell, Menu, Clock, KeyRound } from "lucide-react";
 import { User } from "../lib/types";
 
 interface HeaderProps {
@@ -14,6 +14,7 @@ interface HeaderProps {
   currentUser?: User | null;
   sessionSecondsLeft?: number;
   onOpenUserModal?: () => void;
+  onOpenChangePassword?: () => void;
   onToggleMobileMenu?: () => void;
 }
 
@@ -27,6 +28,7 @@ export default function Header({
   currentUser,
   sessionSecondsLeft,
   onOpenUserModal,
+  onOpenChangePassword,
   onToggleMobileMenu,
 }: HeaderProps) {
   const isDark = theme === "dark";
@@ -97,13 +99,29 @@ export default function Header({
           </button>
         </div>
 
-        {/* Notification Bell with Badge 8 */}
-        <div className="relative cursor-pointer p-1.5 sm:p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900 transition">
+        {/* Notification Bell */}
+        <div className="relative cursor-pointer p-1.5 sm:p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900 transition hidden sm:block">
           <Bell className="w-4 h-4" />
           <span className="absolute top-0.5 right-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-red-500 text-white text-[8px] sm:text-[9px] font-bold flex items-center justify-center leading-none ring-2 ring-[#09090b]">
             8
           </span>
         </div>
+
+        {/* Voluntary Password Change Button */}
+        {onOpenChangePassword && (
+          <button
+            onClick={onOpenChangePassword}
+            className={`p-1.5 sm:p-2 rounded-lg border transition cursor-pointer ${
+              isDark
+                ? "bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800"
+                : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:text-black hover:bg-zinc-200"
+            }`}
+            title="Change Password"
+            aria-label="Change Password"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         {/* Session Countdown Timer */}
         {sessionSecondsLeft !== undefined && (

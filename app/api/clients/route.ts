@@ -36,9 +36,9 @@ function saveStoredClients(clients: Client[]): void {
 
 // GET /api/clients
 export async function GET(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "clients.view" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   const { searchParams } = new URL(req.url);
@@ -146,9 +146,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/clients
 export async function POST(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "clients.add" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {

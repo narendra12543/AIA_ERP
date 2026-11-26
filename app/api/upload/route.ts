@@ -3,11 +3,12 @@ import fs from "fs";
 import path from "path";
 import { v2 as cloudinary } from "cloudinary";
 import { authenticateRequest } from "@/lib/auth";
+import { isProduction } from "@/lib/db";
 
-// Configure Cloudinary
-const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "dwvi432ol";
-const apiKey = process.env.CLOUDINARY_API_KEY || "728157961344236";
-const apiSecret = process.env.CLOUDINARY_API_SECRET || "rPC2LOuu9o7w44byrwRcZVJYwpY";
+// Configure Cloudinary from server-side environment variables only (never hardcode secrets)
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
+const apiKey = process.env.CLOUDINARY_API_KEY || "";
+const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
 const targetFolder = process.env.CLOUDINARY_FOLDER || "new_erp";
 
 if (cloudName && apiKey && apiSecret) {
@@ -80,13 +81,15 @@ export async function POST(req: NextRequest) {
           uploadStream.end(buffer);
         });
 
-        // Also save local copy for offline caching
-        const uploadDir = path.join(process.cwd(), "public", "assets", "uploads");
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
+        // In development only, save local copy for offline caching
+        if (!isProduction) {
+          const uploadDir = path.join(process.cwd(), "public", "assets", "uploads");
+          if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+          }
+          const filePath = path.join(uploadDir, fileName);
+          fs.writeFileSync(filePath, buffer);
         }
-        const filePath = path.join(uploadDir, fileName);
-        fs.writeFileSync(filePath, buffer);
 
         return NextResponse.json({
           url: uploadResult.secure_url,
@@ -98,8 +101,19 @@ export async function POST(req: NextRequest) {
           publicId: uploadResult.public_id,
         });
       } catch (cloudErr) {
-        console.warn("Cloudinary upload failed, falling back to local storage:", cloudErr);
+        console.error("Cloudinary upload failed:", cloudErr);
+        if (isProduction) {
+          return NextResponse.json(
+            { error: "Cloud asset upload failed. Please try again." },
+            { status: 503 }
+          );
+        }
       }
+    } else if (isProduction) {
+      return NextResponse.json(
+        { error: "Asset storage service is not configured on the server." },
+        { status: 503 }
+      );
     }
 
     // 2. If Cloudflare R2 / S3 is configured, upload to bucket

@@ -45,16 +45,18 @@ async function runTests() {
 
     const loginInput = await page.waitForSelector('input[type="email"]', { timeout: 6000 }).catch(() => null);
     if (loginInput) {
-      console.log("2. Submitting login credentials (sales@avenautomation.in / admin123)...");
-      await page.evaluate(() => {
-        const emailInp = document.querySelector('input[type="email"]');
-        const passInp = document.querySelector('input[type="password"]');
-        if (emailInp) emailInp.value = "sales@avenautomation.in";
-        if (passInp) passInp.value = "admin123";
-        const form = document.querySelector("form");
-        if (form) form.requestSubmit();
-      });
-      await page.waitForSelector("#screen_app_root", { timeout: 15000 });
+      const testEmail = process.env.ERP_TEST_ADMIN_EMAIL;
+      const testPass = process.env.ERP_TEST_ADMIN_PASSWORD;
+      if (!testEmail || !testPass) {
+        throw new Error("ERP_TEST_ADMIN_EMAIL and ERP_TEST_ADMIN_PASSWORD env vars are required.");
+      }
+      console.log("2. Submitting configured test credentials...");
+      await page.type('input[type="email"]', testEmail);
+      await page.type('input[type="password"]', testPass);
+      await Promise.all([
+        page.click('button[type="submit"]'),
+        page.waitForSelector("#screen_app_root", { timeout: 20000 }),
+      ]);
       console.log("2b. Authenticated successfully.");
     }
 

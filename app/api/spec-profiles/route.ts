@@ -36,9 +36,9 @@ function saveStoredProfiles(profiles: SpecProfile[]): void {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "spec_profiles.view" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   // Production Mode: Mandatory PostgreSQL read
@@ -84,9 +84,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "spec_profiles.manage" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {
@@ -195,9 +195,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "spec_profiles.manage" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {
@@ -255,9 +255,9 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await authenticateRequest(req, "Admin");
+  const auth = await authenticateRequest(req, { requiredPermission: "spec_profiles.manage" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {

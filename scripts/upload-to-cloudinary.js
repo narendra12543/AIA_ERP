@@ -2,10 +2,15 @@ const fs = require("fs");
 const path = require("path");
 const { v2: cloudinary } = require("cloudinary");
 
-const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "dwvi432ol";
-const apiKey = process.env.CLOUDINARY_API_KEY || "728157961344236";
-const apiSecret = process.env.CLOUDINARY_API_SECRET || "rPC2LOuu9o7w44byrwRcZVJYwpY";
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+const apiKey = process.env.CLOUDINARY_API_KEY;
+const apiSecret = process.env.CLOUDINARY_API_SECRET;
 const targetFolder = process.env.CLOUDINARY_FOLDER || "new_erp";
+
+if (!cloudName || !apiKey || !apiSecret) {
+  console.error("Error: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET environment variables are required.");
+  process.exit(1);
+}
 
 cloudinary.config({
   cloud_name: cloudName,

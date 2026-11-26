@@ -18,9 +18,12 @@ import {
   Clock,
   ShieldCheck,
   ChevronRight,
+  ChevronLeft,
   Receipt,
   FileCheck2,
   HelpCircle,
+  Search,
+  Trash2,
 } from "lucide-react";
 import { Quotation, Vendor, User } from "../lib/types";
 import { inr, formatIsoToDdMmYyyy } from "../lib/vba-engine";
@@ -36,6 +39,10 @@ interface OverviewProps {
   onPrintQuotation?: (q: Quotation) => void;
   onSendEmail?: (q: Quotation) => void;
   onSendWhatsApp?: (q: Quotation) => void;
+  onDeleteQuotation?: (q: Quotation) => void;
+  canExportPdf?: boolean;
+  canSendEmail?: boolean;
+  canDeleteQuotation?: boolean;
 }
 
 export default function Overview({
@@ -49,9 +56,19 @@ export default function Overview({
   onPrintQuotation,
   onSendEmail,
   onSendWhatsApp,
+  onDeleteQuotation,
+  canExportPdf = true,
+  canSendEmail = true,
+  canDeleteQuotation = false,
 }: OverviewProps) {
   const isDark = theme === "dark";
   const [fyFilter, setFyFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [revisionFilter, setRevisionFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Theme tokens
   const cardBg = isDark
@@ -166,12 +183,35 @@ export default function Overview({
     };
   }, [filteredQuotes]);
 
-  // Recent Real Activity (Quotes & Invoices)
-  const recentActivities = useMemo(() => {
-    return [...filteredQuotes]
-      .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-      .slice(0, 6);
-  }, [filteredQuotes]);
+  // All Quotations (Search, Filter, Sort, Paginate — no 6-record limit)
+  const searchedAndSortedQuotes = useMemo(() => {
+    const qLower = searchQuery.trim().toLowerCase();
+    const list = filteredQuotes.filter((q) => {
+      if (statusFilter !== "all" && (q.status || "Draft") !== statusFilter) return false;
+      const isRev = (q.revision_index && q.revision_index > 0) || /-R\d+$/i.test(q.quotation_no || "");
+      if (revisionFilter === "revised" && !isRev) return false;
+      if (revisionFilter === "original" && isRev) return false;
+      if (qLower) {
+        const hay = `${q.quotation_no || ""} ${q.client_name || ""} ${q.product_type || ""} ${q.subject || ""}`.toLowerCase();
+        if (!hay.includes(qLower)) return false;
+      }
+      return true;
+    });
+
+    return [...list].sort((a, b) => {
+      if (sortBy === "date_asc") return (a.date || "").localeCompare(b.date || "");
+      if (sortBy === "amount_desc") return Number(b.total || 0) - Number(a.total || 0);
+      if (sortBy === "amount_asc") return Number(a.total || 0) - Number(b.total || 0);
+      return (b.date || "").localeCompare(a.date || "");
+    });
+  }, [filteredQuotes, searchQuery, statusFilter, revisionFilter, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(searchedAndSortedQuotes.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedQuotes = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return searchedAndSortedQuotes.slice(start, start + pageSize);
+  }, [searchedAndSortedQuotes, safePage, pageSize]);
 
   // Action Items (Real outstanding balances & missing GSTINs)
   const actionItems = useMemo(() => {
@@ -459,101 +499,304 @@ export default function Overview({
         </div>
       </div>
 
-      {/* 4. Recent Real Commercial Activity Table */}
-      <div className={`border rounded-xl p-5 ${cardBg} space-y-3`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3 border-zinc-800">
+      {/* 4. All Quotations & Commercial Transactions */}
+      <div className={`border rounded-xl p-4 sm:p-5 ${cardBg} space-y-3`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3 border-zinc-800/70">
           <div>
             <h2 className={`text-sm font-bold flex items-center gap-2 ${textHeader}`}>
               <Clock className="w-4 h-4 text-blue-400" />
-              <span>Recent Commercial Transactions & Proposals</span>
+              <span>All Quotations &amp; Commercial Proposals</span>
             </h2>
             <p className={`text-[11px] mt-0.5 ${textMuted}`}>
-              Latest quotations, revisions, and tax invoices recorded in database
+              Complete searchable archive of all authorized quotations, revisions, and invoices
             </p>
           </div>
 
           <span className="text-xs text-zinc-400 font-mono">
-            Showing latest {recentActivities.length} records
+            Total Quotations: {searchedAndSortedQuotes.length}
           </span>
         </div>
 
-        <div className="border border-zinc-800 rounded-lg overflow-x-auto w-full">
-          <table className="w-full min-w-[700px] text-xs text-left">
-            <thead className="bg-zinc-950/60 border-b border-zinc-800 text-zinc-400 uppercase text-[10px] font-bold">
+        {/* Search, Filter & Sort Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs">
+          <div className="relative lg:col-span-2">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Search quote no, client, product, subject..."
+              className={`w-full pl-8 pr-3 py-2 rounded-lg border min-h-[38px] ${
+                isDark ? "bg-black border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+              }`}
+            />
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
+              isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
+            }`}
+          >
+            <option value="all">All Statuses</option>
+            <option value="Draft">Draft</option>
+            <option value="Sent">Sent</option>
+            <option value="Accepted">Accepted</option>
+            <option value="Rejected">Rejected</option>
+          </select>
+
+          <select
+            value={revisionFilter}
+            onChange={(e) => {
+              setRevisionFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
+              isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
+            }`}
+          >
+            <option value="all">All Revisions</option>
+            <option value="original">Originals Only</option>
+            <option value="revised">Revisions Only</option>
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
+              isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
+            }`}
+          >
+            <option value="date_desc">Newest Date First</option>
+            <option value="date_asc">Oldest Date First</option>
+            <option value="amount_desc">Highest Amount</option>
+            <option value="amount_asc">Lowest Amount</option>
+          </select>
+        </div>
+
+        {/* Desktop Table */}
+        <div className={`hidden md:block border rounded-lg overflow-x-auto w-full ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+          <table className="w-full min-w-[780px] text-xs text-left">
+            <thead className={`${isDark ? "bg-zinc-950/60 border-zinc-800 text-zinc-400" : "bg-zinc-100 border-zinc-200 text-zinc-600"} border-b uppercase text-[10px] font-bold`}>
               <tr>
                 <th className="py-2.5 px-3">Quotation No</th>
                 <th className="py-2.5 px-3">Date</th>
                 <th className="py-2.5 px-3">Client Company</th>
-                <th className="py-2.5 px-3">Product Scope</th>
+                <th className="py-2.5 px-3">Product / Subject</th>
+                <th className="py-2.5 px-3 text-center">Status</th>
                 <th className="py-2.5 px-3 text-right">Amount (₹)</th>
-                <th className="py-2.5 px-3 text-center">Linked Invoices</th>
-                <th className="py-2.5 px-3 text-right">Action</th>
+                <th className="py-2.5 px-3 text-center">Docs</th>
+                <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/70">
-              {recentActivities.map((q) => (
-                <tr
-                  key={q.id}
-                  onClick={() => onOpenQuotation(q)}
-                  className={`transition cursor-pointer group ${rowHover}`}
-                >
-                  <td className="py-2.5 px-3 font-mono font-bold text-white group-hover:text-amber-400 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-zinc-400 group-hover:text-amber-400" />
-                    <span>{q.quotation_no}</span>
-                  </td>
-                  <td className="py-2.5 px-3 font-mono text-zinc-400">
-                    {formatIsoToDdMmYyyy(q.date)}
-                  </td>
-                  <td className="py-2.5 px-3 font-semibold text-zinc-200">
-                    <div className="truncate max-w-[200px]">{q.client_name || "-"}</div>
-                  </td>
-                  <td className="py-2.5 px-3 text-zinc-300 truncate max-w-[180px]">
-                    {q.product_type || "Gate Automation"}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
-                    {inr.format(q.total || 0)}
-                  </td>
-                  <td className="py-2.5 px-3 text-center">
-                    <div className="flex items-center justify-center gap-1.5 text-[10px]">
-                      {q.pi_number && (
-                        <span className="px-1.5 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-800 font-mono">
-                          PI
-                        </span>
-                      )}
-                      {q.tax_invoice_number && (
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800 font-mono">
-                          TI
-                        </span>
-                      )}
-                      {!q.pi_number && !q.tax_invoice_number && (
-                        <span className="text-zinc-500">-</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => onOpenQuotation(q)}
-                        className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer"
-                        title="View & Edit in Workspace"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      {onPrintQuotation && (
-                        <button
-                          onClick={() => onPrintQuotation(q)}
-                          className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer"
-                          title="Print Quotation PDF"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+            <tbody className={`divide-y ${isDark ? "divide-zinc-800/70" : "divide-zinc-200"}`}>
+              {paginatedQuotes.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className={`py-8 text-center ${textMuted}`}>
+                    No quotations match your current search or filter criteria.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                paginatedQuotes.map((q) => (
+                  <tr
+                    key={q.id || q.quotation_no}
+                    onClick={() => onOpenQuotation(q)}
+                    className={`transition cursor-pointer group ${rowHover}`}
+                  >
+                    <td className={`py-2.5 px-3 font-mono font-bold group-hover:text-amber-400 flex items-center gap-2 ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      <FileText className="w-3.5 h-3.5 text-zinc-400 group-hover:text-amber-400 shrink-0" />
+                      <span>{q.quotation_no}</span>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-zinc-400 whitespace-nowrap">
+                      {formatIsoToDdMmYyyy(q.date)}
+                    </td>
+                    <td className={`py-2.5 px-3 font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                      <div className="truncate max-w-[190px]">{q.client_name || "-"}</div>
+                    </td>
+                    <td className={`py-2.5 px-3 truncate max-w-[190px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+                      {q.product_type || q.subject || "-"}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/60 bg-zinc-800/40 text-zinc-300">
+                        {q.status || "Draft"}
+                      </span>
+                    </td>
+                    <td className={`py-2.5 px-3 text-right font-mono font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {inr.format(q.total || 0)}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1 text-[10px]">
+                        {q.pi_number && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-800 font-mono">
+                            PI
+                          </span>
+                        )}
+                        {q.tax_invoice_number && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800 font-mono">
+                            TI
+                          </span>
+                        )}
+                        {!q.pi_number && !q.tax_invoice_number && (
+                          <span className="text-zinc-500">-</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => onOpenQuotation(q)}
+                          className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer"
+                          title="Open in Quotation System"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        {canExportPdf && onPrintQuotation && (
+                          <button
+                            onClick={() => onPrintQuotation(q)}
+                            className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer"
+                            title="Generate PDF"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canSendEmail && onSendEmail && (
+                          <button
+                            onClick={() => onSendEmail(q)}
+                            className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-sky-400 hover:text-sky-300 transition cursor-pointer"
+                            title="Email Quotation"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canDeleteQuotation && onDeleteQuotation && (
+                          <button
+                            onClick={() => onDeleteQuotation(q)}
+                            className="p-1.5 rounded bg-zinc-800 hover:bg-rose-950 text-zinc-400 hover:text-rose-400 transition cursor-pointer"
+                            title="Delete Quotation"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Quotation Cards */}
+        <div className="md:hidden space-y-2.5">
+          {paginatedQuotes.length === 0 ? (
+            <div className={`p-6 text-center text-xs border rounded-lg ${isDark ? "border-zinc-800 text-zinc-400" : "border-zinc-200 text-zinc-500"}`}>
+              No quotations found.
+            </div>
+          ) : (
+            paginatedQuotes.map((q) => (
+              <div
+                key={q.id || q.quotation_no}
+                onClick={() => onOpenQuotation(q)}
+                className={`p-3 rounded-lg border space-y-2 cursor-pointer ${isDark ? "bg-zinc-900/50 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className={`text-xs font-mono font-bold ${isDark ? "text-amber-400" : "text-blue-700"}`}>
+                      {q.quotation_no}
+                    </div>
+                    <div className={`text-xs font-semibold truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {q.client_name || "-"}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className={`text-xs font-mono font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {inr.format(q.total || 0)}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">{formatIsoToDdMmYyyy(q.date)}</div>
+                  </div>
+                </div>
+                <div className={`text-[11px] truncate ${textMuted}`}>
+                  {q.product_type || q.subject || "-"}
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                    {q.status || "Draft"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => onOpenQuotation(q)}
+                      className="px-2.5 py-1.5 rounded bg-zinc-800 text-zinc-200 text-[11px] font-semibold cursor-pointer"
+                    >
+                      Open
+                    </button>
+                    {canExportPdf && onPrintQuotation && (
+                      <button
+                        onClick={() => onPrintQuotation(q)}
+                        className="px-2.5 py-1.5 rounded bg-emerald-600 text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        PDF
+                      </button>
+                    )}
+                    {canSendEmail && onSendEmail && (
+                      <button
+                        onClick={() => onSendEmail(q)}
+                        className="px-2.5 py-1.5 rounded bg-sky-600 text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        Email
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Pagination Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-zinc-400">
+          <div className="flex items-center gap-2">
+            <span>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className={`px-2 py-1 rounded border ${isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="p-1.5 rounded border border-zinc-700 disabled:opacity-40 cursor-pointer"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="p-1.5 rounded border border-zinc-700 disabled:opacity-40 cursor-pointer"
+              aria-label="Next page"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

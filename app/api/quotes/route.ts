@@ -4,7 +4,8 @@ import path from "path";
 import { Quotation } from "../../../lib/types";
 import { initialQuotations } from "../../../lib/sample-data";
 import { query, initDb, isProduction } from "../../../lib/db";
-import { authenticateRequest } from "../../../lib/auth";
+import { authenticateRequest, logAudit } from "../../../lib/auth";
+import { hasPermission } from "../../../lib/permissions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -109,7 +110,12 @@ async function syncClientFromQuote(quote: Quotation): Promise<void> {
 export async function GET(req: NextRequest) {
   const auth = await authenticateRequest(req);
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
+  }
+  const canViewAll = hasPermission(auth.user, "quotations.view_all");
+  const canViewOwn = hasPermission(auth.user, "quotations.view_own");
+  if (!canViewAll && !canViewOwn) {
+    return NextResponse.json({ error: "Forbidden: Missing quotation view permission", code: "PERMISSION_DENIED" }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -188,9 +194,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/quotes (Create or Add)
 export async function POST(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "quotations.create" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {
@@ -299,9 +305,9 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/quotes (Update)
 export async function PUT(req: NextRequest) {
-  const auth = await authenticateRequest(req);
+  const auth = await authenticateRequest(req, { requiredPermission: "quotations.edit" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {
@@ -386,9 +392,9 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/quotes?id=...
 export async function DELETE(req: NextRequest) {
-  const auth = await authenticateRequest(req, "Admin");
+  const auth = await authenticateRequest(req, { requiredPermission: "quotations.delete" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {

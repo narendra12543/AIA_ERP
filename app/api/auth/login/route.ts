@@ -3,7 +3,8 @@ import { query, initDb, isProduction } from "@/lib/db";
 import { defaultUsers } from "@/lib/sample-data";
 import { User } from "@/lib/types";
 import {
-  hashPassword,
+  DEFAULT_PASSWORD_EXPIRY_DAYS,
+  ENABLE_PASSWORD_EXPIRY,
   verifyPassword,
   checkRateLimit,
   recordFailedLogin,
@@ -11,6 +12,7 @@ import {
   createSession,
   logAudit,
 } from "@/lib/auth";
+import { normalizeRole, resolveEffectivePermissions } from "@/lib/permissions";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,7 +20,7 @@ export async function POST(req: NextRequest) {
     const { email, password } = body;
 
     const trimmedEmail = String(email || "").trim().toLowerCase();
-    const enteredPassword = String(password || "").trim();
+    const enteredPassword = String(password || "");
 
     if (!trimmedEmail || !enteredPassword) {
       return NextResponse.json(
@@ -27,12 +29,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Rate Limiting
-    const rateCheck = await checkRateLimit(trimmedEmail);
-    if (!rateCheck.allowed) {
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+    const ipRateKey = `ip:${clientIp}`;
+
+    // Distributed Rate Limiting (Account + IP)
+    const emailRateCheck = await checkRateLimit(trimmedEmail);
+    if (!emailRateCheck.allowed) {
       return NextResponse.json(
         {
-          error: `Too many failed login attempts. Account temporarily locked for security. Please try again in ${rateCheck.waitSeconds} seconds.`,
+          error: `Too many failed login attempts. Account temporarily locked for security. Please try again in ${emailRateCheck.waitSeconds} seconds.`,
+        },
+        { status: 429 }
+      );
+    }
+    const ipRateCheck = await checkRateLimit(ipRateKey);
+    if (!ipRateCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: `Too many login attempts from this network. Please try again in ${ipRateCheck.waitSeconds} seconds.`,
         },
         { status: 429 }
       );
@@ -40,33 +57,51 @@ export async function POST(req: NextRequest) {
 
     await initDb();
 
-    // 1. Fetch user from PostgreSQL
     let userRecord: User | null = null;
-    let storedPasswordHash: string = "";
+    let storedPasswordHash = "";
+    let passwordExpiresAt: string | null = null;
+    let mustChangePassword = false;
+    let policyDays = DEFAULT_PASSWORD_EXPIRY_DAYS;
+    let fromDatabase = false;
 
     const dbRes = await query(`SELECT * FROM users WHERE LOWER(email) = $1`, [trimmedEmail]);
     if (dbRes && dbRes.rows.length > 0) {
+      fromDatabase = true;
       const row = dbRes.rows[0];
+      policyDays = Number(row.password_policy_days || DEFAULT_PASSWORD_EXPIRY_DAYS) || DEFAULT_PASSWORD_EXPIRY_DAYS;
+      passwordExpiresAt = row.password_expires_at ? new Date(row.password_expires_at).toISOString() : null;
+      const expiredByDate =
+        ENABLE_PASSWORD_EXPIRY &&
+        passwordExpiresAt !== null &&
+        new Date(passwordExpiresAt).getTime() <= Date.now();
+      mustChangePassword = Boolean(row.must_change_password) || expiredByDate;
+
       userRecord = {
         id: row.id,
         email: row.email,
         name: row.name,
-        role: row.role as "Admin" | "User",
+        role: normalizeRole(row.role),
+        permissions: Array.isArray(row.permissions) ? row.permissions : undefined,
         status: row.status as "active" | "inactive",
+        password_changed_at: row.password_changed_at ? new Date(row.password_changed_at).toISOString() : null,
+        password_expires_at: passwordExpiresAt,
+        must_change_password: mustChangePassword,
         created_at: row.created_at,
       };
-      storedPasswordHash = row.password;
+      storedPasswordHash = row.password || "";
     } else if (!isProduction) {
       // Development-only offline fallback (strictly disabled in production)
       const fallback = defaultUsers.find((u) => u.email.toLowerCase() === trimmedEmail);
       if (fallback) {
-        userRecord = fallback;
-        storedPasswordHash = fallback.password || (fallback.role === "Admin" ? "admin123" : "user123");
+        userRecord = { ...fallback, role: normalizeRole(fallback.role) };
+        storedPasswordHash = fallback.password || (userRecord.role === "Admin" ? "admin123" : "user123");
       }
     }
 
     if (!userRecord) {
       await recordFailedLogin(trimmedEmail);
+      await recordFailedLogin(ipRateKey);
+      await logAudit(null, "LOGIN_FAILED_UNKNOWN_USER", { ip: clientIp }, { module: "auth", outcome: "FAILURE" });
       return NextResponse.json(
         { error: "Invalid credentials. Please verify your email and password." },
         { status: 401 }
@@ -74,51 +109,81 @@ export async function POST(req: NextRequest) {
     }
 
     if (userRecord.status === "inactive") {
-      await logAudit(userRecord.id, "LOGIN_BLOCKED_INACTIVE", { email: trimmedEmail });
+      await logAudit(userRecord.id, "LOGIN_BLOCKED_INACTIVE", { email: trimmedEmail }, { actorName: userRecord.name, module: "auth", outcome: "BLOCKED" });
       return NextResponse.json(
         { error: "This account has been disabled. Please contact the ERP administrator." },
         { status: 403 }
       );
     }
 
-    // Verify Password with Scrypt / fallback
     const isValid = verifyPassword(enteredPassword, storedPasswordHash);
     if (!isValid) {
       await recordFailedLogin(trimmedEmail);
-      await logAudit(userRecord.id, "LOGIN_FAILED_PASSWORD", { email: trimmedEmail });
+      await recordFailedLogin(ipRateKey);
+      await logAudit(
+        userRecord.id,
+        "LOGIN_FAILED_PASSWORD",
+        { email: trimmedEmail, ip: clientIp },
+        { actorName: userRecord.name, module: "auth", outcome: "FAILURE" }
+      );
       return NextResponse.json(
         { error: "Invalid credentials. Please verify your email and password." },
         { status: 401 }
       );
     }
 
-    // Login Succeeded: Reset rate limit
+    // Login succeeded: reset rate limits
     await resetLoginAttempts(trimmedEmail);
+    await resetLoginAttempts(ipRateKey);
 
-    // Create session (ADMIN 20 mins, USER 15 mins) — throws in production if PostgreSQL persistence fails
-    const session = await createSession(userRecord);
+    // Update last_login_at and establish baseline password_expires_at if missing (without inventing password_changed_at)
+    if (fromDatabase) {
+      try {
+        if (!passwordExpiresAt && ENABLE_PASSWORD_EXPIRY) {
+          const baselineExpiry = new Date(Date.now() + policyDays * 24 * 60 * 60 * 1000).toISOString();
+          passwordExpiresAt = baselineExpiry;
+          await query(
+            `UPDATE users SET last_login_at = NOW(), password_expires_at = $1, updated_at = NOW() WHERE id = $2`,
+            [baselineExpiry, userRecord.id]
+          );
+        } else {
+          await query(`UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1`, [userRecord.id]);
+        }
+      } catch {}
+    }
+
+    // Create session (restricted if mustChangePassword is true)
+    const session = await createSession(userRecord, {
+      mustChangePassword,
+      passwordExpiresAt,
+    });
 
     const safeUser = {
       id: userRecord.id,
       email: userRecord.email,
       name: userRecord.name,
-      role: userRecord.role,
+      role: session.role,
+      permissions: Array.from(resolveEffectivePermissions({ role: session.role, permissions: userRecord.permissions })),
       status: userRecord.status,
+      must_change_password: mustChangePassword,
+      password_expires_at: passwordExpiresAt,
     };
 
     const res = NextResponse.json({
       success: true,
       user: safeUser,
+      mustChangePassword,
       session: {
         expiresAt: session.expiresAt.toISOString(),
         token: session.token,
+        mustChangePassword,
+        passwordExpiresAt,
       },
     });
 
-    // Set secure HTTP-only cookie
     res.cookies.set("aven_session", session.token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isProduction,
       sameSite: "strict",
       path: "/",
       expires: session.expiresAt,
@@ -126,7 +191,7 @@ export async function POST(req: NextRequest) {
 
     return res;
   } catch (err: any) {
-    console.error("Authentication error:", err);
+    console.error("Authentication error:", err?.message || err);
     return NextResponse.json(
       { error: "An authentication error occurred. Please try again." },
       { status: 500 }

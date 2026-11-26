@@ -27,6 +27,7 @@ import {
   X,
   ChevronsUpDown,
   Loader2,
+  Mail,
 } from "lucide-react";
 import { Client, CompanyInfo, Quotation, QuotationItem, SpecProfile, Vendor } from "../lib/types";
 import { handleBulletKeyDown } from "../lib/bullet-helper";
@@ -64,6 +65,9 @@ interface QuotationSystemProps {
   onUpdateCompany?: (company: CompanyInfo) => void;
   onPrintBothPages: () => void;
   onPrintSinglePage: (tabKey: string) => void;
+  onEmailDocument?: (docKind: "quotation" | "pi" | "ti" | "po") => void;
+  canSendEmail?: boolean;
+  canExportPdf?: boolean;
 }
 
 export type SheetTab =
@@ -118,6 +122,9 @@ export default function QuotationSystem({
   onUpdateCompany,
   onPrintBothPages,
   onPrintSinglePage,
+  onEmailDocument,
+  canSendEmail = true,
+  canExportPdf = true,
 }: QuotationSystemProps) {
   const isDark = theme === "dark";
   const [activeTab, setActiveTab] = useState<SheetTab>("dashboard");
@@ -1617,14 +1624,28 @@ export default function QuotationSystem({
                   {currentQuote.quotation_no}
                 </span>
               </div>
-              <button
-                onClick={onPrintBothPages}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
-                title="Save 2-Page Quotation PDF"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Save 2-Page Quotation (PDF)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canSendEmail && onEmailDocument && (
+                  <button
+                    onClick={() => onEmailDocument("quotation")}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Email 2-Page Quotation PDF via Zoho Mail"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Email Quotation</span>
+                  </button>
+                )}
+                {canExportPdf && (
+                  <button
+                    onClick={onPrintBothPages}
+                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Save 2-Page Quotation PDF"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Save 2-Page Quotation (PDF)</span>
+                  </button>
+                )}
+              </div>
             </div>
             <div className="w-full overflow-x-auto pb-6">
               <Page1Technical
@@ -1648,14 +1669,28 @@ export default function QuotationSystem({
                   {currentQuote.quotation_no}
                 </span>
               </div>
-              <button
-                onClick={onPrintBothPages}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
-                title="Save 2-Page Quotation PDF"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Save 2-Page Quotation (PDF)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canSendEmail && onEmailDocument && (
+                  <button
+                    onClick={() => onEmailDocument("quotation")}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Email 2-Page Quotation PDF via Zoho Mail"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Email Quotation</span>
+                  </button>
+                )}
+                {canExportPdf && (
+                  <button
+                    onClick={onPrintBothPages}
+                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Save 2-Page Quotation PDF"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Save 2-Page Quotation (PDF)</span>
+                  </button>
+                )}
+              </div>
             </div>
             <div className="w-full overflow-x-auto pb-6">
               <CommercialOffer quote={currentQuote} company={companyInfo || company} />
@@ -1675,14 +1710,28 @@ export default function QuotationSystem({
                   {currentQuote.pi_number}
                 </span>
               </div>
-              <button
-                onClick={() => onPrintSinglePage("pi")}
-                className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
-                title="Save Official Proforma Invoice PDF"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Save Proforma Invoice (PDF)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canSendEmail && onEmailDocument && (
+                  <button
+                    onClick={() => onEmailDocument("pi")}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Email Proforma Invoice PDF via Zoho Mail"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Email PI</span>
+                  </button>
+                )}
+                {canExportPdf && (
+                  <button
+                    onClick={() => onPrintSinglePage("pi")}
+                    className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-3 py-1 rounded shadow-sm transition cursor-pointer"
+                    title="Save Official Proforma Invoice PDF"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Save Proforma Invoice (PDF)</span>
+                  </button>
+                )}
+              </div>
             </div>
             <div className="w-full overflow-x-auto pb-6">
               <ProformaInvoice quote={currentQuote} company={companyInfo || company} />
@@ -1708,26 +1757,40 @@ export default function QuotationSystem({
                     {currentQuote.tax_invoice_number}
                   </span>
                 </div>
-                <button
-                  onClick={() => {
-                    if (!isGstinValid) {
-                      alert(
-                        "⚠️ Tax Invoice Generation Blocked: Client GSTIN is missing or invalid.\n\nA valid 15-digit GSTIN is mandatory by statutory law to issue an official Tax Invoice.\nPlease update the Client GSTIN in the quotation details before generating this Tax Invoice."
-                      );
-                      return;
-                    }
-                    onPrintSinglePage("ti");
-                  }}
-                  className={`flex items-center gap-1.5 font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer self-start sm:self-auto ${
-                    isGstinValid
-                      ? "bg-emerald-700 hover:bg-emerald-600 text-white"
-                      : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
-                  }`}
-                  title={isGstinValid ? "Save Official Tax Invoice PDF" : "Client GSTIN required to generate Tax Invoice"}
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Save Tax Invoice (PDF)</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  {canSendEmail && onEmailDocument && (
+                    <button
+                      onClick={() => onEmailDocument("ti")}
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                      title="Email Tax Invoice PDF via Zoho Mail"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>Email Tax Invoice</span>
+                    </button>
+                  )}
+                  {canExportPdf && (
+                    <button
+                      onClick={() => {
+                        if (!isGstinValid) {
+                          alert(
+                            "⚠️ Tax Invoice Generation Blocked: Client GSTIN is missing or invalid.\n\nA valid 15-digit GSTIN is mandatory by statutory law to issue an official Tax Invoice.\nPlease update the Client GSTIN in the quotation details before generating this Tax Invoice."
+                          );
+                          return;
+                        }
+                        onPrintSinglePage("ti");
+                      }}
+                      className={`flex items-center gap-1.5 font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer ${
+                        isGstinValid
+                          ? "bg-emerald-700 hover:bg-emerald-600 text-white"
+                          : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                      }`}
+                      title={isGstinValid ? "Save Official Tax Invoice PDF" : "Client GSTIN required to generate Tax Invoice"}
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Save Tax Invoice (PDF)</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* GSTIN Statutory Validation Status Banner */}
@@ -1776,14 +1839,28 @@ export default function QuotationSystem({
                   {poData.po_number || "PO-AIA-001"}
                 </span>
               </div>
-              <button
-                onClick={() => onPrintSinglePage("po")}
-                className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer self-start sm:self-auto"
-                title="Save Official Purchase Order PDF"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Save Purchase Order (PDF)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                {canSendEmail && onEmailDocument && (
+                  <button
+                    onClick={() => onEmailDocument("po")}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                    title="Email Purchase Order PDF via Zoho Mail"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Email PO</span>
+                  </button>
+                )}
+                {canExportPdf && (
+                  <button
+                    onClick={() => onPrintSinglePage("po")}
+                    className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                    title="Save Official Purchase Order PDF"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Save Purchase Order (PDF)</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Dedicated PO Vendor Selection Control Panel */}

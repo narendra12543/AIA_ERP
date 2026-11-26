@@ -4,7 +4,7 @@ import path from "path";
 import { CompanyInfo } from "../../../lib/types";
 import { initialCompany } from "../../../lib/sample-data";
 import { query, initDb, isProduction } from "../../../lib/db";
-import { authenticateRequest } from "../../../lib/auth";
+import { authenticateRequest, logAudit } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,9 +87,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const auth = await authenticateRequest(req, "Admin");
+  const auth = await authenticateRequest(req, { requiredPermission: "company.manage" });
   if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
   try {
@@ -125,6 +125,7 @@ export async function PUT(req: NextRequest) {
         );
       }
 
+      await logAudit(auth.user.userId, "COMPANY_PROFILE_UPDATED", { branch: body.branch || "" }, { actorName: auth.user.name, module: "company", outcome: "SUCCESS" });
       return NextResponse.json({ success: true, company: body });
     }
 

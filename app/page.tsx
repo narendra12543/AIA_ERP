@@ -8,6 +8,10 @@ import Overview from "../components/Overview";
 import QuotationSystem from "../components/QuotationSystem";
 import UserManagementModal from "../components/UserManagementModal";
 import VendorManagementModal from "../components/VendorManagementModal";
+import PasswordChangeModal from "../components/PasswordChangeModal";
+import AuditLogsModal from "../components/AuditLogsModal";
+import MailCenter, { MailComposeSeed } from "../components/MailCenter";
+import AdminSettingsView from "../components/AdminSettingsView";
 import Page1Technical from "../components/Page1Technical";
 import CommercialOffer from "../components/CommercialOffer";
 import ProformaInvoice from "../components/ProformaInvoice";
@@ -15,6 +19,7 @@ import TaxInvoice from "../components/TaxInvoice";
 import PurchaseOrderComponent from "../components/PurchaseOrder";
 import LoginScreen from "../components/LoginScreen";
 import { CompanyInfo, Quotation, SpecProfile, User, Vendor } from "../lib/types";
+import { hasPermission } from "../lib/permissions";
 import { initialData } from "../lib/mock-data";
 import { initialVendors } from "../lib/sample-data";
 import {
@@ -31,15 +36,20 @@ import {
 import { exportElementsToPdf } from "../lib/pdf-export";
 
 export default function Home() {
-  const [currentView, setCurrentView] = useState<"overview" | "quotation">("quotation");
+  const [currentView, setCurrentView] = useState<"overview" | "quotation" | "mail" | "settings">("quotation");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
+  const [passwordExpiresAt, setPasswordExpiresAt] = useState<string | null>(null);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isAuditLogsOpen, setIsAuditLogsOpen] = useState(false);
   const [users, setUsers] = useState<User[]>(initialData.users);
+  const [mailSeed, setMailSeed] = useState<MailComposeSeed | null>(null);
 
   // Business state
   const [company, setCompany] = useState<CompanyInfo>(initialData.company);
@@ -143,11 +153,15 @@ export default function Home() {
               .then((data) => {
                 if (data && data.authenticated && data.user) {
                   setCurrentUser(data.user);
+                  setMustChangePassword(Boolean(data.mustChangePassword));
+                  setPasswordExpiresAt(data.passwordExpiresAt || data.user.password_expires_at || null);
                   const serverExpiresMs = new Date(data.expiresAt).getTime();
                   setSessionExpiresAt(serverExpiresMs);
                   const left = Math.max(0, Math.floor((serverExpiresMs - Date.now()) / 1000));
                   setSessionSecondsLeft(left);
-                  loadPersistentData(tabSession.token);
+                  if (!data.mustChangePassword) {
+                    loadPersistentData(tabSession.token);
+                  }
                 } else {
                   sessionStorage.removeItem("aven_tab_session");
                   setCurrentUser(null);
@@ -562,8 +576,38 @@ export default function Home() {
     }
   }
 
-  function handleLogin(user: User, sessionInfo?: { expiresAt?: string; token?: string }) {
+  async function refreshUsers(tokenOverride?: string) {
+    try {
+      let token = tokenOverride || "";
+      if (!token && typeof window !== "undefined") {
+        const raw = sessionStorage.getItem("aven_tab_session");
+        if (raw) token = JSON.parse(raw)?.token || "";
+      }
+      const res = await fetch("/api/users", {
+        headers: token ? { "x-tab-session": token } : {},
+      });
+      if (res.ok) {
+        const uData = await res.json();
+        if (Array.isArray(uData)) setUsers(uData);
+      }
+    } catch (e) {
+      console.warn("Could not refresh users from API", e);
+    }
+  }
+
+  function handleLogin(
+    user: User,
+    sessionInfo?: {
+      expiresAt?: string;
+      token?: string;
+      mustChangePassword?: boolean;
+      passwordExpiresAt?: string | null;
+    }
+  ) {
     setCurrentUser(user);
+    const forcedChange = Boolean(sessionInfo?.mustChangePassword || user.must_change_password);
+    setMustChangePassword(forcedChange);
+    setPasswordExpiresAt(sessionInfo?.passwordExpiresAt || user.password_expires_at || null);
     const token = sessionInfo?.token || "";
     let expiresMs: number;
     if (sessionInfo?.expiresAt) {
@@ -583,12 +627,17 @@ export default function Home() {
       );
       localStorage.removeItem("aven_current_user");
     }
-    loadPersistentData(token);
+    if (!forcedChange) {
+      loadPersistentData(token);
+    }
   }
 
   async function handleLogout(reason?: string) {
     setCurrentUser(null);
     setSessionExpiresAt(null);
+    setMustChangePassword(false);
+    setPasswordExpiresAt(null);
+    setIsChangePasswordOpen(false);
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("aven_tab_session");
       localStorage.removeItem("aven_current_user");
@@ -626,6 +675,76 @@ export default function Home() {
     );
   }
 
+  // Non-bypassable 15-day / forced password change gate
+  if (mustChangePassword) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${theme === "dark" ? "bg-[#09090b] text-white" : "bg-slate-50 text-zinc-900"}`}>
+        <PasswordChangeModal
+          isOpen={true}
+          forced={true}
+          userEmail={currentUser.email}
+          passwordExpiresAt={passwordExpiresAt}
+          theme={theme}
+          onLogout={() => handleLogout("Password change required before accessing ERP.")}
+          onSuccess={({ token, expiresAt, passwordExpiresAt: nextExp }) => {
+            setMustChangePassword(false);
+            setPasswordExpiresAt(nextExp || null);
+            const updatedUser = { ...currentUser, must_change_password: false, password_expires_at: nextExp || null };
+            setCurrentUser(updatedUser);
+            const expMs = new Date(expiresAt).getTime();
+            setSessionExpiresAt(expMs);
+            setSessionSecondsLeft(Math.max(0, Math.floor((expMs - Date.now()) / 1000)));
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(
+                "aven_tab_session",
+                JSON.stringify({ user: updatedUser, expiresAt, token })
+              );
+            }
+            loadPersistentData(token);
+          }}
+        />
+      </div>
+    );
+  }
+
+  const daysUntilPasswordExpiry = passwordExpiresAt
+    ? Math.ceil((new Date(passwordExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+  const showPasswordExpiryBanner =
+    daysUntilPasswordExpiry !== null && daysUntilPasswordExpiry <= 5 && daysUntilPasswordExpiry >= 0;
+
+  const canExportPdf = hasPermission(currentUser, "quotations.export");
+  const canSendEmail = hasPermission(currentUser, "mail.send");
+  const canDeleteQuotation = hasPermission(currentUser, "quotations.delete");
+
+  function openMailForQuotation(
+    q: Quotation,
+    docKind: "quotation" | "pi" | "ti" | "po" = "quotation"
+  ) {
+    setCurrentQuote(q);
+    const subjectMap = {
+      quotation: `Quotation ${q.quotation_no} for ${q.product_type || "Industrial Automation"} - ${company.name}`,
+      pi: `Proforma Invoice ${q.pi_number || q.quotation_no} - ${company.name}`,
+      ti: `Tax Invoice ${q.tax_invoice_number || q.quotation_no} - ${company.name}`,
+      po: `Purchase Order PO-2026-011 - ${company.name}`,
+    };
+    const docTypeMap = {
+      quotation: "Quotation" as const,
+      pi: "Proforma Invoice" as const,
+      ti: "Tax Invoice" as const,
+      po: "Purchase Order" as const,
+    };
+    setMailSeed({
+      to: docKind === "po" ? vendors[0]?.email || "" : q.client_email || "",
+      subject: subjectMap[docKind],
+      bodyHtml: `<p>Dear ${docKind === "po" ? "Sir/Madam" : q.client_contact || "Sir/Madam"},</p><p>Please find attached our <strong>${docTypeMap[docKind]}</strong> (Ref: <strong>${q.quotation_no}</strong>) for your review.</p>`,
+      quotation: q,
+      documentType: docTypeMap[docKind],
+      autoAttachDoc: docKind,
+    });
+    setCurrentView("mail");
+  }
+
   return (
     <>
       {/* ============================================================ */}
@@ -647,7 +766,16 @@ export default function Home() {
           currentUser={currentUser}
           theme={theme}
           onOpenUserManagement={() => {
+            refreshUsers();
             setIsUserModalOpen(true);
+            setMobileMenuOpen(false);
+          }}
+          onOpenAuditLogs={() => {
+            setIsAuditLogsOpen(true);
+            setMobileMenuOpen(false);
+          }}
+          onOpenChangePassword={() => {
+            setIsChangePasswordOpen(true);
             setMobileMenuOpen(false);
           }}
           onLogout={handleLogout}
@@ -659,10 +787,22 @@ export default function Home() {
         {/* Main App Content */}
         <main className="flex-1 ml-0 md:ml-64 flex flex-col min-w-0 w-full overflow-x-hidden">
           <Header
-            title={currentView === "overview" ? "Overview" : "Quotations"}
+            title={
+              currentView === "overview"
+                ? "Overview"
+                : currentView === "mail"
+                ? "Zoho Mail Center"
+                : currentView === "settings"
+                ? "Admin Settings"
+                : "Quotations"
+            }
             subtitle={
               currentView === "overview"
-                ? "Executive summary & operations"
+                ? "Executive summary & all quotations"
+                : currentView === "mail"
+                ? "Integrated Zoho SMTP, templates & AI assistant"
+                : currentView === "settings"
+                ? "Encrypted SMTP, AI Assistant, storage & security"
                 : "Proposals and scope estimates"
             }
             theme={theme}
@@ -671,9 +811,32 @@ export default function Home() {
             onSearchChange={(s) => setSearchTerm(s)}
             currentUser={currentUser}
             sessionSecondsLeft={sessionSecondsLeft}
-            onOpenUserModal={() => setIsUserModalOpen(true)}
+            onOpenUserModal={() => {
+              refreshUsers();
+              setIsUserModalOpen(true);
+            }}
+            onOpenChangePassword={() => setIsChangePasswordOpen(true)}
             onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
           />
+
+          {/* Password Expiry Reminder Banner (<= 5 days remaining) */}
+          {showPasswordExpiryBanner && (
+            <div className="mx-3 sm:mx-6 mt-3 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 no-print">
+              <span>
+                <strong>Password Expiry Reminder:</strong> Your password expires in{" "}
+                <strong>
+                  {daysUntilPasswordExpiry} day{daysUntilPasswordExpiry === 1 ? "" : "s"}
+                </strong>
+                . Update it early to avoid interruption.
+              </span>
+              <button
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="px-3 py-1 rounded-lg bg-amber-500 text-black font-bold text-[11px] cursor-pointer self-start sm:self-auto"
+              >
+                Change Password
+              </button>
+            </div>
+          )}
 
           {/* 5-Minute Inactivity Session Warning Banner */}
           {showSessionWarning && (
@@ -700,6 +863,9 @@ export default function Home() {
                 theme={theme}
                 vendors={vendors}
                 currentUser={currentUser}
+                canExportPdf={canExportPdf}
+                canSendEmail={canSendEmail}
+                canDeleteQuotation={canDeleteQuotation}
                 onOpenQuotation={(q) => {
                   setCurrentQuote(q);
                   setCurrentView("quotation");
@@ -713,15 +879,39 @@ export default function Home() {
                   setCurrentQuote(q);
                   setTimeout(() => handleExportQuotation(), 100);
                 }}
-                onSendEmail={(q) => {
-                  const email = q.client_email || "sales@avenautomation.in";
-                  window.open(`mailto:${email}?subject=Quotation%20for%20${encodeURIComponent(q.product_type || "Gate Automation")}`);
-                }}
+                onDeleteQuotation={(q) => handleDeleteQuotation(q.id)}
+                onSendEmail={(q) => openMailForQuotation(q, "quotation")}
                 onSendWhatsApp={(q) => {
                   const rawPhone = (q.client_contact || "").replace(/[^0-9]/g, "");
                   const phone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
                   window.open(`https://web.whatsapp.com/send?phone=${phone}&text=Quotation%20${encodeURIComponent(q.quotation_no)}`, "_blank");
                 }}
+              />
+            </div>
+          ) : currentView === "mail" ? (
+            <div className="w-full flex-1 flex flex-col">
+              <MailCenter
+                theme={theme}
+                currentUser={currentUser}
+                company={company}
+                quotations={quotations}
+                currentQuote={currentQuote}
+                vendors={vendors}
+                composeSeed={mailSeed}
+                onClearSeed={() => setMailSeed(null)}
+              />
+            </div>
+          ) : currentView === "settings" ? (
+            <div className="w-full flex-1 flex flex-col">
+              <AdminSettingsView
+                theme={theme}
+                currentUser={currentUser}
+                company={company}
+                onOpenUserManagement={() => {
+                  refreshUsers();
+                  setIsUserModalOpen(true);
+                }}
+                onOpenAuditLogs={() => setIsAuditLogsOpen(true)}
               />
             </div>
           ) : (
@@ -733,6 +923,9 @@ export default function Home() {
                 specProfiles={specProfiles}
                 theme={theme}
                 vendors={vendors}
+                canExportPdf={canExportPdf}
+                canSendEmail={canSendEmail}
+                onEmailDocument={(docKind) => openMailForQuotation(currentQuote, docKind)}
                 onOpenVendorModal={() => setIsVendorModalOpen(true)}
                 onUpdateSpecProfiles={(profs) => setSpecProfiles(profs)}
                 onUpdateQuote={(q) => setCurrentQuote(q)}
@@ -760,10 +953,41 @@ export default function Home() {
             isOpen={isUserModalOpen}
             onClose={() => setIsUserModalOpen(false)}
             users={users}
-            onAddUser={handleAddUser}
-            onDeleteUser={handleDeleteUser}
-            onUpdateRole={handleUpdateRole}
+            onRefreshUsers={() => refreshUsers()}
             currentUserId={currentUser?.id || "usr_1"}
+          />
+
+          {/* Audit Logs Modal (Admin) */}
+          <AuditLogsModal
+            isOpen={isAuditLogsOpen}
+            onClose={() => setIsAuditLogsOpen(false)}
+            theme={theme}
+          />
+
+          {/* Voluntary Change Password Modal */}
+          <PasswordChangeModal
+            isOpen={isChangePasswordOpen}
+            forced={false}
+            userEmail={currentUser.email}
+            passwordExpiresAt={passwordExpiresAt}
+            theme={theme}
+            onClose={() => setIsChangePasswordOpen(false)}
+            onLogout={() => handleLogout()}
+            onSuccess={({ token, expiresAt, passwordExpiresAt: nextExp }) => {
+              setIsChangePasswordOpen(false);
+              setPasswordExpiresAt(nextExp || null);
+              const updatedUser = { ...currentUser, must_change_password: false, password_expires_at: nextExp || null };
+              setCurrentUser(updatedUser);
+              const expMs = new Date(expiresAt).getTime();
+              setSessionExpiresAt(expMs);
+              setSessionSecondsLeft(Math.max(0, Math.floor((expMs - Date.now()) / 1000)));
+              if (typeof window !== "undefined") {
+                sessionStorage.setItem(
+                  "aven_tab_session",
+                  JSON.stringify({ user: updatedUser, expiresAt, token })
+                );
+              }
+            }}
           />
 
           {/* Dedicated Vendor / Supplier Management Modal */}

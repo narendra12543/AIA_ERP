@@ -1,16 +1,19 @@
 "use client";
 
 import React from "react";
-import { LayoutDashboard, FileText, HelpCircle, Users, LogOut, ShieldCheck, User as UserIcon, X, Building2 } from "lucide-react";
+import { LayoutDashboard, FileText, HelpCircle, Users, LogOut, X, Building2, Mail, ScrollText, KeyRound, Settings } from "lucide-react";
 import { User } from "../lib/types";
+import { hasPermission } from "../lib/permissions";
 
 interface SidebarProps {
-  currentView: "overview" | "quotation";
-  onSelectView: (view: "overview" | "quotation") => void;
+  currentView: "overview" | "quotation" | "mail" | "settings";
+  onSelectView: (view: "overview" | "quotation" | "mail" | "settings") => void;
   currentUser: User | null;
   theme?: "dark" | "light";
   onOpenUserManagement: () => void;
   onOpenVendorManagement?: () => void;
+  onOpenAuditLogs?: () => void;
+  onOpenChangePassword?: () => void;
   onLogout: () => void;
   isOpen?: boolean;
   onClose?: () => void;
@@ -23,14 +26,21 @@ export default function Sidebar({
   theme = "dark",
   onOpenUserManagement,
   onOpenVendorManagement,
+  onOpenAuditLogs,
+  onOpenChangePassword,
   onLogout,
   isOpen = false,
   onClose,
 }: SidebarProps) {
   const isDark = theme === "dark";
-  const isAdmin = currentUser?.role === "Admin";
+  const canManageUsers = hasPermission(currentUser, "users.manage");
+  const canViewAuditLogs = hasPermission(currentUser, "audit_logs.view");
+  const canViewVendors = hasPermission(currentUser, "vendors.view");
+  const canUseMail =
+    hasPermission(currentUser, "mail.send") || hasPermission(currentUser, "mail.view");
+  const canOpenSettings = hasPermission(currentUser, "mail.settings");
 
-  const handleNav = (v: "overview" | "quotation") => {
+  const handleNav = (v: "overview" | "quotation" | "mail" | "settings") => {
     onSelectView(v);
     if (onClose) onClose();
   };
@@ -124,8 +134,27 @@ export default function Sidebar({
               <span>Quotation System</span>
             </button>
 
-            {/* Button 3: PO Vendors */}
-            {onOpenVendorManagement && (
+            {/* Button 3: Zoho Mail Center */}
+            {canUseMail && (
+              <button
+                onClick={() => handleNav("mail")}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  currentView === "mail"
+                    ? isDark
+                      ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
+                      : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
+                    : isDark
+                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
+                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
+                }`}
+              >
+                <Mail className="w-4 h-4 text-emerald-500" />
+                <span>Mail Center</span>
+              </button>
+            )}
+
+            {/* Button 4: PO Vendors */}
+            {onOpenVendorManagement && canViewVendors && (
               <button
                 onClick={() => {
                   onOpenVendorManagement();
@@ -139,6 +168,43 @@ export default function Sidebar({
               >
                 <Building2 className="w-4 h-4 text-amber-500" />
                 <span>PO Vendors</span>
+              </button>
+            )}
+
+            {/* Button 5: Security Audit Logs (Admin) */}
+            {onOpenAuditLogs && canViewAuditLogs && (
+              <button
+                onClick={() => {
+                  onOpenAuditLogs();
+                  if (onClose) onClose();
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  isDark
+                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
+                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
+                }`}
+              >
+                <ScrollText className="w-4 h-4 text-indigo-400" />
+                <span>Audit Logs</span>
+              </button>
+            )}
+
+            {/* Button 6: Admin Integration Settings */}
+            {canOpenSettings && (
+              <button
+                onClick={() => handleNav("settings")}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  currentView === "settings"
+                    ? isDark
+                      ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
+                      : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
+                    : isDark
+                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
+                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
+                }`}
+              >
+                <Settings className="w-4 h-4 text-sky-400" />
+                <span>Admin Settings</span>
               </button>
             )}
           </div>
@@ -173,8 +239,8 @@ export default function Sidebar({
             </span>
           </div>
 
-          <div className={`flex items-center gap-1.5 pt-2 border-t ${isDark ? "border-zinc-800/80" : "border-zinc-200"}`}>
-            {isAdmin && (
+          <div className={`flex flex-wrap items-center gap-1.5 pt-2 border-t ${isDark ? "border-zinc-800/80" : "border-zinc-200"}`}>
+            {canManageUsers && (
               <button
                 onClick={onOpenUserManagement}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-1 text-[10px] rounded border transition cursor-pointer ${isDark ? "text-zinc-300 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 border-zinc-700/40" : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"}`}
@@ -182,6 +248,19 @@ export default function Sidebar({
               >
                 <Users className="w-3 h-3" />
                 <span>Users</span>
+              </button>
+            )}
+            {onOpenChangePassword && (
+              <button
+                onClick={() => {
+                  onOpenChangePassword();
+                  if (onClose) onClose();
+                }}
+                className={`flex items-center justify-center gap-1 py-1 px-2 text-[10px] rounded border transition cursor-pointer ${isDark ? "text-zinc-300 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 border-zinc-700/40" : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"}`}
+                title="Change Password"
+              >
+                <KeyRound className="w-3 h-3" />
+                <span>PW</span>
               </button>
             )}
             <button

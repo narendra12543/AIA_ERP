@@ -136,11 +136,27 @@ export default function TaxInvoice({ quote, company }: TaxInvoiceProps) {
               <div style={{ fontSize: "9px", color: "#222222" }}>
                 Phone: {company.phone} &nbsp;|&nbsp; Email: {company.email}
               </div>
-              <div style={{ fontSize: "9px", color: "#222222", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
-                <div>GSTIN: <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{company.gstin}</span></div>
+             <div style={{
+                fontSize: "9px",
+                fontWeight: 700,
+                color: "#222222",
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: "6px"
+              }}>
+                <div>
+                  GSTIN: <span style={{ fontFamily: "monospace" }}>{company.gstin}</span>
+                </div>
+
                 <div style={{ color: "#888888" }}>|</div>
-                <div>PAN No: <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{company.pan}</span></div>
+
+                <div>
+                  PAN No: <span style={{ fontFamily: "monospace" }}>{company.pan}</span>
+                </div>
+
                 <div style={{ color: "#888888" }}>|</div>
+
                 <div>State: {company.state}</div>
               </div>
             </div>

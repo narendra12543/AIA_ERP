@@ -92,11 +92,88 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "User" | "ADMIN" | "USER";
+  role: "Admin" | "Staff" | "User" | "ADMIN" | "STAFF" | "USER";
   status?: string;
   active?: boolean;
   password?: string;
+  permissions?: string[];
+  password_changed_at?: string | null;
+  password_expires_at?: string | null;
+  must_change_password?: boolean;
+  password_policy_days?: number;
+  last_login_at?: string | null;
+  locked_until?: number | null;
   created_at?: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id?: string | null;
+  actor_name?: string | null;
+  action: string;
+  module?: string | null;
+  record_ref?: string | null;
+  outcome?: string | null;
+  request_id?: string | null;
+  details?: any;
+  created_at: string;
+}
+
+export interface EmailAttachment {
+  name: string;
+  mimeType: string;
+  size: number;
+  dataBase64?: string;
+  quoteRef?: string;
+  docType?: "quotation" | "pi" | "ti" | "po" | "custom";
+}
+
+export interface EmailDraft {
+  id: string;
+  user_id?: string;
+  to_emails: string;
+  cc_emails?: string;
+  bcc_emails?: string;
+  subject: string;
+  body_html: string;
+  attachments?: EmailAttachment[];
+  quote_ref?: string;
+  quotation_no?: string | null;
+  document_type?: string | null;
+  updated_at: string;
+  created_at?: string;
+}
+
+export interface EmailHistoryEntry {
+  id: string;
+  user_id?: string;
+  from_email: string;
+  to_emails: string;
+  cc_emails?: string;
+  subject: string;
+  body_html: string;
+  attachments?: EmailAttachment[];
+  quote_ref?: string;
+  quotation_no?: string | null;
+  document_type?: string | null;
+  sent_by?: string;
+  status: "sent" | "failed";
+  provider?: string;
+  message_id?: string | null;
+  error_message?: string | null;
+  sent_at: string;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  category: string;
+  subject?: string;
+  subject_template?: string;
+  body_html: string;
+  is_system?: boolean;
+  is_default?: boolean;
+  updated_at?: string;
 }
 
 export interface Client {
