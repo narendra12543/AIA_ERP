@@ -118,14 +118,14 @@ export default function Overview({
     };
   }, [selectedFY]);
 
-  // Theme tokens
+  // Theme tokens (Enterprise Neutral Design System)
   const cardBg = isDark
-    ? "bg-[#09090b] border-zinc-800 text-zinc-100"
-    : "bg-white border-zinc-200 text-zinc-900 shadow-xs";
-  const subCardBg = isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-50 border-zinc-200";
-  const textMuted = isDark ? "text-zinc-400" : "text-zinc-500";
-  const textHeader = isDark ? "text-white" : "text-zinc-950";
-  const rowHover = isDark ? "hover:bg-zinc-900/80" : "hover:bg-zinc-100/80";
+    ? "bg-[#17181B] border-[#2A2C30] text-[#F4F4F5]"
+    : "bg-white border-[#E2E4E8] text-[#18181B]";
+  const subCardBg = isDark ? "bg-[#1D1F23] border-[#2A2C30]" : "bg-[#F7F8FA] border-[#E2E4E8]";
+  const textMuted = isDark ? "text-[#A1A1AA]" : "text-[#71717A]";
+  const textHeader = isDark ? "text-[#F4F4F5]" : "text-[#18181B]";
+  const rowHover = isDark ? "hover:bg-[#1D1F23]" : "hover:bg-zinc-100/80";
 
   const availableFYs = useMemo(() => {
     const dates = quotations.map((q) => q.date || "").filter(Boolean);
@@ -313,27 +313,22 @@ export default function Overview({
   }, [filteredQuotes]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 animate-fade-in">
-      {/* 1. Header: Command Center Title & Contextual Date Filter */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 border-zinc-800/80">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
+      {/* 1. Compact Page Heading & Contextual FY Filter */}
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 ${isDark ? "border-[#2A2C30]" : "border-[#E2E4E8]"}`}>
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${textHeader}`}>
-              Business Command Center
-            </h1>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-              Live Production
-            </span>
-          </div>
-          <p className={`text-xs mt-1 ${textMuted}`}>
-            Aven Industrial Automation &bull; Executive financial metrics & commercial operations
+          <h2 className={`text-[22px] font-semibold tracking-tight ${textHeader}`}>
+            Overview
+          </h2>
+          <p className={`text-[13px] mt-0.5 ${textMuted}`}>
+            Business performance and operational summary.
           </p>
         </div>
 
         {/* Filter & Quick Actions */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 bg-zinc-900 border-zinc-800 text-xs text-zinc-300">
-            <Calendar className="w-3.5 h-3.5 text-amber-500" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`flex items-center gap-1.5 border rounded-md px-2.5 h-9 text-[13px] ${subCardBg} ${textHeader}`}>
+            <Calendar className={`w-3.5 h-3.5 ${textMuted}`} />
             <select
               aria-label="Global Financial Year"
               value={selectedFY}
@@ -341,20 +336,22 @@ export default function Overview({
                 setSelectedFY(e.target.value);
                 setCurrentPage(1);
               }}
-              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer"
+              className="bg-transparent text-[13px] focus:outline-none cursor-pointer"
             >
               {availableFYs.map((fy) => (
-                <option key={fy} value={fy} className="bg-zinc-900 text-white">
+                <option key={fy} value={fy} className={isDark ? "bg-[#17181B] text-[#F4F4F5]" : "bg-white text-[#18181B]"}>
                   {fy === currentFY ? `${formatFYLabel(fy)} (Current)` : formatFYLabel(fy)}
                 </option>
               ))}
-              <option value="ALL" className="bg-zinc-900 text-white">All Financial Years ({quotations.length})</option>
+              <option value="ALL" className={isDark ? "bg-[#17181B] text-[#F4F4F5]" : "bg-white text-[#18181B]"}>
+                All Financial Years ({quotations.length})
+              </option>
             </select>
           </div>
           {selectedFY !== currentFY && (
             <button
               onClick={resetToCurrentFY}
-              className="text-[11px] px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition cursor-pointer font-semibold"
+              className={`h-9 px-3 rounded-md border text-[12px] font-medium transition-colors duration-150 cursor-pointer ${subCardBg} ${textHeader}`}
             >
               Reset to {formatFYLabel(currentFY)}
             </button>
@@ -362,113 +359,94 @@ export default function Overview({
 
           <button
             onClick={onNewQuotation}
-            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-3.5 py-2 rounded-lg transition shadow-sm cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-[13px] h-9 px-3.5 rounded-md transition-colors duration-150 cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             <span>New Quotation</span>
           </button>
         </div>
       </div>
 
-      {/* 2. 4-Column Responsive KPI Cards */}
+      {/* 2. 4-Column Enterprise KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1: Total Turnover (Excl. GST) / Pipeline */}
-        <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
-          <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>
+        <div className={`p-4 rounded-lg border ${cardBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[12px] font-medium ${textMuted}`}>
               {financeData?.kpis ? "Total Turnover (Excl. GST)" : "Total Business Value"}
             </span>
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              <TrendingUp className="w-4 h-4" />
-            </div>
+            <TrendingUp className={`w-4 h-4 ${textMuted}`} />
           </div>
-          <div className={`text-2xl font-black font-mono tracking-tight ${textHeader}`}>
+          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${textHeader}`}>
             {inr
               .format(financeData?.kpis ? financeData.kpis.basicTurnover : metrics.totalBusinessValue)
               .replace(/\.00$/, "")}
           </div>
-          <p className={`text-[11px] ${textMuted} mt-1.5 flex items-center gap-1 font-medium`}>
-            {financeData?.kpis ? (
-              <>
-                <span className="text-emerald-400 font-bold">{financeData.kpis.convertedOrders} Orders</span>
-                <span>&bull; Pipeline: {inr.format(metrics.totalBusinessValue).replace(/\.00$/, "")}</span>
-              </>
-            ) : (
-              <>
-                <span className="text-emerald-400 font-bold">{metrics.totalCount} Proposals</span>
-                <span>in commercial pipeline</span>
-              </>
-            )}
+          <p className={`text-[11px] ${textMuted} mt-1.5`}>
+            {financeData?.kpis
+              ? `${financeData.kpis.convertedOrders} Confirmed Orders • Pipeline ${inr.format(metrics.totalBusinessValue).replace(/\.00$/, "")}`
+              : `${metrics.totalCount} Proposals in pipeline`}
           </p>
         </div>
 
         {/* KPI 2: Outstanding Payments */}
-        <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
-          <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>Outstanding Payments</span>
-            <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              <AlertCircle className="w-4 h-4" />
-            </div>
+        <div className={`p-4 rounded-lg border ${cardBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[12px] font-medium ${textMuted}`}>Outstanding Receivables</span>
+            <AlertCircle className={`w-4 h-4 ${textMuted}`} />
           </div>
-          <div className="text-2xl font-black font-mono tracking-tight text-rose-400">
+          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : metrics.outstandingPayments) > 0 ? "text-rose-500" : textHeader}`}>
             {inr
               .format(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : metrics.outstandingPayments)
               .replace(/\.00$/, "")}
           </div>
-          <p className={`text-[11px] ${textMuted} mt-1.5 flex items-center gap-1 font-medium flex-wrap`}>
-            <span>Received:</span>
-            <span className="text-emerald-400 font-bold font-mono">
-              {inr.format(financeData?.kpis ? financeData.kpis.customerReceived : metrics.totalAdvance).replace(/\.00$/, "")}
-            </span>
-            {financeData?.kpis && selectedFY !== "ALL" && (
-              <span>&bull; Lifetime: {inr.format(financeData.kpis.lifetimeOutstanding).replace(/\.00$/, "")}</span>
-            )}
+          <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
+            Received: {inr.format(financeData?.kpis ? financeData.kpis.customerReceived : metrics.totalAdvance).replace(/\.00$/, "")}
+            {financeData?.kpis && selectedFY !== "ALL"
+              ? ` • Lifetime: ${inr.format(financeData.kpis.lifetimeOutstanding).replace(/\.00$/, "")}`
+              : ""}
           </p>
         </div>
 
-        {/* KPI 3: Net Profit & Expenses (or Total Invoiced) */}
-        <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
-          <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>
+        {/* KPI 3: Net Profit / Total Invoiced */}
+        <div className={`p-4 rounded-lg border ${cardBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[12px] font-medium ${textMuted}`}>
               {financeData?.kpis ? "Net Profit" : "Total Invoiced"}
             </span>
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              {financeData?.kpis ? <Wallet className="w-4 h-4" /> : <Receipt className="w-4 h-4" />}
-            </div>
+            {financeData?.kpis ? <Wallet className={`w-4 h-4 ${textMuted}`} /> : <Receipt className={`w-4 h-4 ${textMuted}`} />}
           </div>
-          <div className={`text-2xl font-black font-mono tracking-tight ${financeData?.kpis && financeData.kpis.netProfit < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${financeData?.kpis && financeData.kpis.netProfit < 0 ? "text-rose-500" : textHeader}`}>
             {inr
               .format(financeData?.kpis ? financeData.kpis.netProfit : metrics.totalInvoiced)
               .replace(/\.00$/, "")}
           </div>
-          <p className={`text-[11px] ${textMuted} mt-1.5 font-medium`}>
+          <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
             {financeData?.kpis
-              ? `Expenses: ${inr.format(financeData.kpis.operatingExpenses).replace(/\.00$/, "")} • Cash: ${inr.format(financeData.kpis.cashBalance).replace(/\.00$/, "")}`
-              : "Issued via Official Tax Invoices & PIs"}
+              ? `Expenses: ${inr.format(financeData.kpis.operatingExpenses).replace(/\.00$/, "")}`
+              : "Issued via Tax Invoices & PIs"}
           </p>
         </div>
 
         {/* KPI 4: Active Purchase Orders & Vendors */}
-        <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
-          <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>Active Purchase Orders</span>
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Building2 className="w-4 h-4" />
-            </div>
+        <div className={`p-4 rounded-lg border ${cardBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[12px] font-medium ${textMuted}`}>Purchase Order Vendors</span>
+            <Building2 className={`w-4 h-4 ${textMuted}`} />
           </div>
-          <div className={`text-2xl font-black font-mono tracking-tight ${textHeader}`}>
-            {metrics.vendorsCount} <span className="text-sm font-normal text-zinc-400">Vendors</span>
+          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${textHeader}`}>
+            {metrics.vendorsCount} <span className={`text-[13px] font-normal ${textMuted}`}>Vendors</span>
           </div>
           <div className="mt-1.5 flex items-center justify-between">
-            <span className={`text-[11px] ${textMuted} font-medium`}>
+            <span className={`text-[11px] ${textMuted}`}>
               {financeData?.kpis?.pendingApprovalsCount
-                ? `${financeData.kpis.pendingApprovalsCount} Expense Approvals`
-                : "Registered PO Suppliers"}
+                ? `${financeData.kpis.pendingApprovalsCount} Pending Approvals`
+                : "Registered Suppliers"}
             </span>
             {onOpenVendorModal && (
               <button
                 onClick={onOpenVendorModal}
-                className="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                className="text-[11px] text-amber-500 hover:text-amber-400 font-medium flex items-center gap-0.5 cursor-pointer"
               >
                 Manage &rarr;
               </button>
@@ -480,31 +458,31 @@ export default function Overview({
       {/* Compact Secondary Finance Strip when Finance & Operations data is active */}
       {financeData?.kpis && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between`}>
+          <div className={`px-4 py-3 rounded-lg border ${cardBg} flex items-center justify-between`}>
             <div>
               <p className={`text-[11px] font-medium ${textMuted}`}>Customer Received ({formatFYLabel(selectedFY)})</p>
-              <p className={`text-sm font-bold font-mono ${textHeader}`}>{inr.format(financeData.kpis.customerReceived)}</p>
+              <p className={`text-[14px] font-semibold tabular-nums mt-0.5 ${textHeader}`}>{inr.format(financeData.kpis.customerReceived)}</p>
             </div>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <CheckCircle2 className={`w-4 h-4 ${textMuted}`} />
           </div>
-          <div className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between`}>
+          <div className={`px-4 py-3 rounded-lg border ${cardBg} flex items-center justify-between`}>
             <div>
-              <p className={`text-[11px] font-medium ${textMuted}`}>Total Expenses ({formatFYLabel(selectedFY)})</p>
-              <p className={`text-sm font-bold font-mono ${textHeader}`}>{inr.format(financeData.kpis.operatingExpenses)}</p>
+              <p className={`text-[11px] font-medium ${textMuted}`}>Approved Expenses ({formatFYLabel(selectedFY)})</p>
+              <p className={`text-[14px] font-semibold tabular-nums mt-0.5 ${textHeader}`}>{inr.format(financeData.kpis.operatingExpenses)}</p>
             </div>
-            <Receipt className="w-4 h-4 text-amber-400" />
+            <Receipt className={`w-4 h-4 ${textMuted}`} />
           </div>
           <div
             onClick={onNavigateFinance}
-            className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between ${onNavigateFinance ? "cursor-pointer hover:border-amber-500/40" : ""}`}
+            className={`px-4 py-3 rounded-lg border ${cardBg} flex items-center justify-between ${onNavigateFinance ? "cursor-pointer hover:border-amber-500/50" : ""}`}
           >
             <div>
               <p className={`text-[11px] font-medium ${textMuted}`}>Pending Expense Approvals</p>
-              <p className={`text-sm font-bold font-mono ${financeData.kpis.pendingApprovalsCount ? "text-amber-400" : textHeader}`}>
+              <p className={`text-[14px] font-semibold tabular-nums mt-0.5 ${textHeader}`}>
                 {financeData.kpis.pendingApprovalsCount || 0} Claims ({inr.format(financeData.kpis.pendingApprovalsAmount || 0)})
               </p>
             </div>
-            <ArrowUpRight className="w-4 h-4 text-amber-400" />
+            <ArrowUpRight className={`w-4 h-4 ${textMuted}`} />
           </div>
         </div>
       )}

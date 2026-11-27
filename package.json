@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "verify:protected": "node scripts/verify-protected-documents.mjs",
+    "prebuild": "node scripts/verify-protected-documents.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

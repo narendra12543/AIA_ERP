@@ -46,36 +46,42 @@ export default function Header({
   return (
     <TooltipProvider delayDuration={150}>
       <header
-        className={`h-16 px-3 sm:px-6 lg:px-8 border-b ${
-          isDark ? "bg-[#09090b]/95 border-zinc-800 text-white" : "bg-white/95 border-zinc-200 text-zinc-900"
-        } backdrop-blur-sm flex items-center justify-between gap-2 sticky top-0 z-30 no-print select-none`}
+        className={`h-14 px-4 sm:px-6 border-b ${
+          isDark
+            ? "bg-[#101113]/90 border-[#2A2C30] text-[#F4F4F5]"
+            : "bg-white/90 border-[#E2E4E8] text-[#18181B]"
+        } backdrop-blur-md flex items-center justify-between gap-3 sticky top-0 z-30 no-print select-none`}
       >
-        {/* Left: Mobile Hamburger + View Title & Subtitle */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        {/* Left: Mobile Hamburger + Permanent Global Brand Title */}
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className={`p-2 -ml-1 rounded-lg md:hidden transition-all duration-150 active:scale-95 cursor-pointer ${
+            className={`p-2 -ml-1 rounded-md md:hidden transition-colors duration-150 cursor-pointer ${
               isDark
-                ? "text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+                ? "text-[#A1A1AA] hover:bg-[#1D1F23] hover:text-[#F4F4F5]"
+                : "text-[#71717A] hover:bg-zinc-100 hover:text-[#18181B]"
             }`}
             aria-label="Toggle navigation drawer"
             title="Open menu"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-4 h-4" />
           </button>
           <div className="min-w-0 truncate">
-            <h1
-              className={`text-sm sm:text-xl lg:text-2xl font-black tracking-tight leading-none truncate ${
-                isDark ? "text-white" : "text-zinc-900"
+            <span
+              className={`block text-[15px] sm:text-base font-semibold tracking-tight leading-tight truncate ${
+                isDark ? "text-[#F4F4F5]" : "text-[#18181B]"
               }`}
             >
-              {title}
-            </h1>
-            <p className={`text-[10px] sm:text-[11px] mt-1 font-medium truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-              {subtitle}
-            </p>
+              AVEN Master ERP
+            </span>
+            <span
+              className={`block text-[11px] font-normal leading-tight truncate ${
+                isDark ? "text-[#A1A1AA]" : "text-[#71717A]"
+              }`}
+            >
+              Enterprise Management System
+            </span>
           </div>
         </div>
 

@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "policy": "PERMANENT_LOCK_NO_UNAPPROVED_EDITS",
+  "protectedFiles": [
+    {
+      "path": "components/QuotationSystem.tsx",
+      "sha256": "6CCC4FB7CBBC33B07BDC7E0609224F8F1F58CADF7E08101032AE98E3CFA4B387",
+      "module": "Quotation System UI & Workflow"
+    },
+    {
+      "path": "components/Page1Technical.tsx",
+      "sha256": "527B3F674EE9926B11E9A28F23A11E9F980ADDE58F0FD56B8B394C1D119707B3",
+      "module": "Quotation Technical Page 1"
+    },
+    {
+      "path": "components/CommercialOffer.tsx",
+      "sha256": "9BE0840B6894D3703430A6D0CBC7E6D6778011CAA32B8092C89C549BDCBCA195",
+      "module": "Commercial Offer Page 2"
+    },
+    {
+      "path": "components/ProformaInvoice.tsx",
+      "sha256": "3C1914AA1947574D4DE2146E86E5042D03EAAA6FB7F568E71767935B5ECBE293",
+      "module": "Proforma Invoice Template"
+    },
+    {
+      "path": "components/TaxInvoice.tsx",
+      "sha256": "C6D7C6F6604C566F082EC5F1A4294AABEF2494489EEA56F91F8994D52BC8D61F",
+      "module": "Tax Invoice Template"
+    },
+    {
+      "path": "components/PurchaseOrder.tsx",
+      "sha256": "541E87F4080D544881BBA4EDCA6C9590592682C62606F06F7BFFBBE67C057E9E",
+      "module": "Purchase Order Template"
+    },
+    {
+      "path": "components/PurchaseOrderForm.tsx",
+      "sha256": "C105DA9E93691BDA5E2997122F7D054E4FFB1DF67DF1954EE30D61B38BEC21DA",
+      "module": "Purchase Order Independent Form"
+    },
+    {
+      "path": "lib/vba-engine.ts",
+      "sha256": "74A5748FF7FB164154F7932615628F9E8C138A8B4F1A55BBD4257ECF75F02877",
+      "module": "Document Calculations & Numbering Engine"
+    },
+    {
+      "path": "lib/pdf-export.ts",
+      "sha256": "3014D7BBEFB9AEB17C09C3CD25026219AA8E73FF652050151CE1EC3AC9001B99",
+      "module": "Client PDF Export Orchestrator"
+    },
+    {
+      "path": "lib/bullet-helper.ts",
+      "sha256": "681ED5B2BBCBC3238F101971DAA71B1771DED58BAE4B06FAD28CCE01636FC54F",
+      "module": "Technical Bullet Formatting Helper"
+    },
+    {
+      "path": "app/api/export-pdf/route.ts",
+      "sha256": "08EAEEEF16573FC19380EA2C8BDFB6AD08D9DAEF5DBD14587AAA88F07F1657B4",
+      "module": "Native Chromium Vector PDF Engine"
+    }
+  ]
+}

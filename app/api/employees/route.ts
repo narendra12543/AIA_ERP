@@ -62,8 +62,9 @@ export async function GET(req: NextRequest) {
        ORDER BY ep.employee_id ASC`,
       []
     );
-    const selfProfile = (res?.rows || []).find((r: any) => r.user_id === auth.user.userId) || null;
-    return NextResponse.json({ items: res?.rows || [], selfProfile, tableMissing: false });
+    const empRows = res?.rows || [];
+    const selfProfile = empRows.find((r: any) => r.user_id === auth.user.userId) || null;
+    return NextResponse.json({ items: empRows, employees: empRows, selfProfile, tableMissing: false });
   } catch (err: any) {
     console.error("Failed to fetch employees:", err);
     return NextResponse.json({ error: "Failed to fetch employees." }, { status: 500 });

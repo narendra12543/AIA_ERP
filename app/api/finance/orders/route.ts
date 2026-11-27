@@ -72,23 +72,39 @@ export async function GET(req: NextRequest) {
       params
     );
 
-    // Fetch line items for returned orders
+    // Fetch line items & maintenance for returned orders
     const orders = res?.rows || [];
     if (orders.length > 0) {
       const ids = orders.map((o: any) => o.id);
       const itemsRes = await query(`SELECT * FROM finance_order_items WHERE order_id = ANY($1) ORDER BY sort_order ASC`, [ids]);
+      const maintRes = await query(`SELECT * FROM finance_maintenance_records WHERE order_id = ANY($1)`, [ids]);
       const itemsByOrder = new Map<string, any[]>();
       for (const it of itemsRes?.rows || []) {
         const list = itemsByOrder.get(it.order_id) || [];
         list.push(it);
         itemsByOrder.set(it.order_id, list);
       }
+      const maintByOrder = new Map<string, any>();
+      for (const m of maintRes?.rows || []) {
+        maintByOrder.set(m.order_id, m);
+      }
       for (const o of orders) {
         o.items = itemsByOrder.get(o.id) || [];
+        o.maintenance = maintByOrder.get(o.id) || null;
+        const tot = Number(o.total_order_value || 0);
+        const rec = Number(o.received_amount || 0);
+        o.payment_status =
+          o.order_status === "Financially Closed"
+            ? "Financially Closed"
+            : tot > 0 && rec >= tot - 0.01
+            ? "Fully Paid"
+            : rec > 0
+            ? "Partially Paid"
+            : "Pending Payment";
       }
     }
 
-    return NextResponse.json({ items: orders, tableMissing: false });
+    return NextResponse.json({ items: orders, orders, tableMissing: false });
   } catch (err: any) {
     console.error("Failed to fetch finance orders:", err);
     return NextResponse.json({ error: "Failed to load orders." }, { status: 500 });
@@ -242,6 +258,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (body.maintenance && body.maintenance.required) {
+      const mRev = Number(body.maintenance.revenue) || 0;
+      const mCost = Number(body.maintenance.cost) || 0;
+      const mProfit = Number((mRev - mCost).toFixed(2));
+      await query(
+        `INSERT INTO finance_maintenance_records (
+          id, order_id, required, maintenance_type, start_date, end_date, status, revenue, cost, profit, notes
+        ) VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          `fmr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+          id,
+          body.maintenance.maintenance_type || "AMC",
+          body.maintenance.start_date || null,
+          body.maintenance.end_date || null,
+          body.maintenance.status || "Active",
+          mRev,
+          mCost,
+          mProfit,
+          body.maintenance.notes || null,
+        ]
+      );
+    }
+
     await logAudit(auth.user.userId, "FINANCE_ORDER_CREATED", { orderNo, clientName, basicValue, totalOrderValue }, { actorName: auth.user.name, module: "finance_orders", recordRef: orderNo, outcome: "SUCCESS" });
     return NextResponse.json({ success: true, id, order_no: orderNo });
   } catch (err: any) {
@@ -268,10 +307,26 @@ export async function PUT(req: NextRequest) {
     if (body.order_status === "Financially Closed") {
       const pRes = await query(`SELECT COALESCE(SUM(CASE WHEN status='Posted' THEN amount ELSE 0 END), 0)::numeric AS paid FROM finance_customer_payments WHERE order_id=$1`, [id]);
       const paid = Number(pRes?.rows[0]?.paid || 0);
-      if (paid + 1 < Number(existing.total_order_value)) {
+      const targetTotal = body.total_order_value !== undefined ? Number(body.total_order_value) : Number(existing.total_order_value);
+      if (paid + 1 < targetTotal) {
         return NextResponse.json({ error: "Cannot mark Financially Closed while outstanding balance remains." }, { status: 400 });
       }
     }
+
+    const nextBasic = body.basic_value !== undefined ? Number(body.basic_value) : null;
+    const nextGstRate = body.gst_rate !== undefined ? Number(body.gst_rate) : null;
+    const nextGstAmt =
+      body.gst_amount !== undefined
+        ? Number(body.gst_amount)
+        : nextBasic !== null && nextGstRate !== null
+        ? Number(((nextBasic * nextGstRate) / 100).toFixed(2))
+        : null;
+    const nextTotal =
+      body.total_order_value !== undefined
+        ? Number(body.total_order_value)
+        : nextBasic !== null && nextGstAmt !== null
+        ? Number((nextBasic + nextGstAmt).toFixed(2))
+        : null;
 
     await query(
       `UPDATE finance_orders SET
@@ -280,19 +335,75 @@ export async function PUT(req: NextRequest) {
          tax_invoice_number = COALESCE($3, tax_invoice_number),
          completion_date = COALESCE($4, completion_date),
          remarks = COALESCE($5, remarks),
-         updated_by = $6,
+         project_name = COALESCE($6, project_name),
+         project_description = COALESCE($7, project_description),
+         customer_po_no = COALESCE($8, customer_po_no),
+         customer_po_date = COALESCE($9, customer_po_date),
+         pi_number = COALESCE($10, pi_number),
+         basic_value = COALESCE($11, basic_value),
+         gst_rate = COALESCE($12, gst_rate),
+         gst_amount = COALESCE($13, gst_amount),
+         total_order_value = COALESCE($14, total_order_value),
+         updated_by = $15,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7`,
+       WHERE id = $16`,
       [
         body.order_status || null,
         body.invoice_status || null,
-        body.tax_invoice_number || null,
-        body.completion_date || null,
+        body.tax_invoice_number !== undefined ? body.tax_invoice_number : null,
+        body.completion_date !== undefined ? body.completion_date : null,
         body.remarks !== undefined ? body.remarks : null,
+        body.project_name || null,
+        body.project_description !== undefined ? body.project_description : null,
+        body.customer_po_no !== undefined ? body.customer_po_no : null,
+        body.customer_po_date !== undefined ? body.customer_po_date : null,
+        body.pi_number !== undefined ? body.pi_number : null,
+        nextBasic,
+        nextGstRate,
+        nextGstAmt,
+        nextTotal,
         auth.user.email,
         id,
       ]
     );
+
+    if (Array.isArray(body.items)) {
+      await query(`DELETE FROM finance_order_items WHERE order_id = $1`, [id]);
+      for (let idx = 0; idx < body.items.length; idx++) {
+        const it = body.items[idx];
+        const qty = Number(it.qty) || 1;
+        const sellingPrice = Number(it.selling_price ?? it.price) || 0;
+        const salesValue = Number((qty * sellingPrice).toFixed(2));
+        const mfg = Number(it.manufacturing_cost) || 0;
+        const inst = Number(it.installation_cost) || 0;
+        const other = Number(it.other_cost) || 0;
+        const totalCost = Number((mfg + inst + other).toFixed(2));
+        const grossProfit = Number((salesValue - totalCost).toFixed(2));
+        const profitPct = salesValue > 0 ? Number(((grossProfit / salesValue) * 100).toFixed(2)) : 0;
+        await query(
+          `INSERT INTO finance_order_items (
+            id, order_id, product_name, category, qty, selling_price, sales_value,
+            manufacturing_cost, installation_cost, other_cost, total_cost, gross_profit, profit_pct, sort_order
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            `foi_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 5)}`,
+            id,
+            String(it.product_name || it.name || "Item").split(/\r?\n/)[0].trim(),
+            it.category ? String(it.category).trim() : null,
+            qty,
+            sellingPrice,
+            salesValue,
+            mfg,
+            inst,
+            other,
+            totalCost,
+            grossProfit,
+            profitPct,
+            idx,
+          ]
+        );
+      }
+    }
 
     await logAudit(auth.user.userId, "FINANCE_ORDER_UPDATED", { orderNo: existing.order_no, order_status: body.order_status }, { actorName: auth.user.name, module: "finance_orders", recordRef: existing.order_no, outcome: "SUCCESS" });
     return NextResponse.json({ success: true });

@@ -234,7 +234,7 @@ export default function Sidebar({
                 />
                 <NavItem
                   label="Add Expense"
-                  icon={<PlusCircle className="w-4 h-4 text-amber-400" />}
+                  icon={<PlusCircle className="w-4 h-4" />}
                   active={currentView === "staff_portal" && staffTab === "add_expense"}
                   onClick={() => handleStaffNav("add_expense")}
                   isCollapsed={isCollapsed}
@@ -248,7 +248,7 @@ export default function Sidebar({
                 />
                 <NavItem
                   label="Reimbursements"
-                  icon={<BadgeIndianRupee className="w-4 h-4 text-emerald-400" />}
+                  icon={<BadgeIndianRupee className="w-4 h-4" />}
                   active={currentView === "staff_portal" && staffTab === "reimbursements"}
                   onClick={() => handleStaffNav("reimbursements")}
                   isCollapsed={isCollapsed}
@@ -293,7 +293,7 @@ export default function Sidebar({
                 {canUseMail && (
                   <NavItem
                     label="Mail Center"
-                    icon={<Mail className="w-4 h-4 text-emerald-500" />}
+                    icon={<Mail className="w-4 h-4" />}
                     active={currentView === "mail"}
                     onClick={() => handleNav("mail")}
                     isCollapsed={isCollapsed}
@@ -303,7 +303,7 @@ export default function Sidebar({
                 {canViewFinance && (
                   <NavItem
                     label="Finance & Operations"
-                    icon={<Wallet className="w-4 h-4 text-amber-400" />}
+                    icon={<Wallet className="w-4 h-4" />}
                     active={currentView === "finance"}
                     onClick={() => handleNav("finance")}
                     isCollapsed={isCollapsed}
@@ -313,7 +313,7 @@ export default function Sidebar({
                 {canViewOwnExpenses && (
                   <NavItem
                     label="My Expenses"
-                    icon={<Receipt className="w-4 h-4 text-cyan-400" />}
+                    icon={<Receipt className="w-4 h-4" />}
                     active={currentView === "staff_portal"}
                     onClick={() => handleStaffNav("dashboard")}
                     isCollapsed={isCollapsed}
@@ -323,7 +323,7 @@ export default function Sidebar({
                 {canOpenSettings && (
                   <NavItem
                     label="Admin Settings"
-                    icon={<Settings className="w-4 h-4 text-sky-400" />}
+                    icon={<Settings className="w-4 h-4" />}
                     active={currentView === "settings"}
                     onClick={() => handleNav("settings")}
                     isCollapsed={isCollapsed}

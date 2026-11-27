@@ -140,14 +140,14 @@ export default function StaffPortalView({
   const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
 
   const cardBg = isDark
-    ? "bg-[#09090b] border-zinc-800 text-zinc-100"
-    : "bg-white border-zinc-200 text-zinc-900 shadow-xs";
-  const subCardBg = isDark ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-50 border-zinc-200";
+    ? "bg-[#17181B] border-[#2A2C30] text-[#F4F4F5]"
+    : "bg-white border-[#E2E4E8] text-[#18181B]";
+  const subCardBg = isDark ? "bg-[#1D1F23] border-[#2A2C30]" : "bg-[#F7F8FA] border-[#E2E4E8]";
   const inputCls = isDark
-    ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500 focus:border-amber-500"
-    : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-amber-500";
-  const textMuted = isDark ? "text-zinc-400" : "text-zinc-500";
-  const textHeader = isDark ? "text-white" : "text-zinc-950";
+    ? "bg-[#101113] border-[#2A2C30] text-[#F4F4F5] placeholder-[#71717A] focus:border-amber-500"
+    : "bg-white border-[#E2E4E8] text-[#18181B] placeholder-[#A1A1AA] focus:border-amber-500";
+  const textMuted = isDark ? "text-[#A1A1AA]" : "text-[#71717A]";
+  const textHeader = isDark ? "text-[#F4F4F5]" : "text-[#18181B]";
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -162,11 +162,11 @@ export default function StaffPortalView({
 
       if (expRes.ok) {
         const d = await expRes.json();
-        setClaims(d.claims || []);
+        setClaims(d.items || d.claims || []);
       }
       if (catRes.ok) {
         const d = await catRes.json();
-        const cats = d.categories || [];
+        const cats = d.items || d.categories || [];
         setCategories(cats);
         if (!categoryId && cats.length > 0) {
           setCategoryId(String(cats[0].id));
@@ -174,15 +174,15 @@ export default function StaffPortalView({
       }
       if (reimbRes.ok) {
         const d = await reimbRes.json();
-        setReimbursements(d.reimbursements || []);
+        setReimbursements(d.items || d.reimbursements || []);
       }
       if (notifRes.ok) {
         const d = await notifRes.json();
-        setNotifications(d.notifications || []);
+        setNotifications(d.items || d.notifications || []);
       }
       if (empRes.ok) {
         const d = await empRes.json();
-        const mine = (d.employees || []).find(
+        const mine = (d.items || d.employees || []).find(
           (e: EmployeeProfile & { user_id?: string | number }) =>
             String(e.user_id) === String(currentUser?.id) || e.email === currentUser?.email
         );
