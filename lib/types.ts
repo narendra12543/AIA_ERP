@@ -92,7 +92,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "Staff" | "User" | "ADMIN" | "STAFF" | "USER";
+  role: "Admin" | "Sales" | "Accounts" | "Staff" | "User" | "ADMIN" | "SALES" | "ACCOUNTS" | "STAFF" | "USER";
   status?: string;
   approval_status?: string;
   mfa_enabled?: boolean;

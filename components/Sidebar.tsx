@@ -14,17 +14,28 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Wallet,
+  PlusCircle,
+  Receipt,
+  BadgeIndianRupee,
+  Bell,
+  UserCircle,
 } from "lucide-react";
 import { User } from "../lib/types";
-import { hasPermission } from "../lib/permissions";
+import { hasPermission, normalizeRole } from "../lib/permissions";
+import type { StaffPortalTab } from "./StaffPortalView";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { Sheet, SheetContent } from "./ui/sheet";
 import { Separator } from "./ui/separator";
 import { Badge } from "./ui/badge";
 
+export type AppView = "overview" | "quotation" | "mail" | "settings" | "finance" | "staff_portal";
+
 interface SidebarProps {
-  currentView: "overview" | "quotation" | "mail" | "settings";
-  onSelectView: (view: "overview" | "quotation" | "mail" | "settings") => void;
+  currentView: AppView;
+  onSelectView: (view: AppView) => void;
+  staffTab?: StaffPortalTab;
+  onSelectStaffTab?: (tab: StaffPortalTab) => void;
   currentUser: User | null;
   theme?: "dark" | "light";
   collapsed?: boolean;
@@ -41,6 +52,8 @@ interface SidebarProps {
 export default function Sidebar({
   currentView,
   onSelectView,
+  staffTab = "dashboard",
+  onSelectStaffTab,
   currentUser,
   theme = "dark",
   collapsed = false,
@@ -54,15 +67,33 @@ export default function Sidebar({
   onClose,
 }: SidebarProps) {
   const isDark = theme === "dark";
+  const canonicalRole = normalizeRole(currentUser?.role);
+  const isStaffOnly = canonicalRole === "Staff";
   const canManageUsers = hasPermission(currentUser, "users.manage");
   const canViewAuditLogs = hasPermission(currentUser, "audit_logs.view");
   const canViewVendors = hasPermission(currentUser, "vendors.view");
+  const canViewOverview = hasPermission(currentUser, "overview.view");
+  const canViewQuotations =
+    hasPermission(currentUser, "quotations.view_all") ||
+    hasPermission(currentUser, "quotations.view_own");
   const canUseMail =
     hasPermission(currentUser, "mail.send") || hasPermission(currentUser, "mail.view");
+  const canViewFinance =
+    hasPermission(currentUser, "finance.dashboard") ||
+    hasPermission(currentUser, "finance.orders") ||
+    hasPermission(currentUser, "expenses.view");
+  const canViewOwnExpenses =
+    hasPermission(currentUser, "expenses.view_own") || hasPermission(currentUser, "expenses.create");
   const canOpenSettings = hasPermission(currentUser, "mail.settings");
 
-  const handleNav = (v: "overview" | "quotation" | "mail" | "settings") => {
+  const handleNav = (v: AppView) => {
     onSelectView(v);
+    if (onClose) onClose();
+  };
+
+  const handleStaffNav = (t: StaffPortalTab) => {
+    onSelectView("staff_portal");
+    if (onSelectStaffTab) onSelectStaffTab(t);
     if (onClose) onClose();
   };
 
@@ -188,68 +219,117 @@ export default function Sidebar({
           <nav className="px-2.5 py-4 space-y-1" aria-label="Primary Workspace Navigation">
             {!isCollapsed && (
               <p className={`px-3 text-[10px] font-bold tracking-wider uppercase mb-2 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-                Workspace
+                {isStaffOnly ? "Staff Portal" : "Workspace"}
               </p>
             )}
 
-            <NavItem
-              label="Overview"
-              icon={<LayoutDashboard className="w-4 h-4" />}
-              active={currentView === "overview"}
-              onClick={() => handleNav("overview")}
-              isCollapsed={isCollapsed}
-            />
+            {isStaffOnly ? (
+              <>
+                <NavItem
+                  label="My Dashboard"
+                  icon={<LayoutDashboard className="w-4 h-4" />}
+                  active={currentView === "staff_portal" && staffTab === "dashboard"}
+                  onClick={() => handleStaffNav("dashboard")}
+                  isCollapsed={isCollapsed}
+                />
+                <NavItem
+                  label="Add Expense"
+                  icon={<PlusCircle className="w-4 h-4 text-amber-400" />}
+                  active={currentView === "staff_portal" && staffTab === "add_expense"}
+                  onClick={() => handleStaffNav("add_expense")}
+                  isCollapsed={isCollapsed}
+                />
+                <NavItem
+                  label="My Expenses"
+                  icon={<Receipt className="w-4 h-4" />}
+                  active={currentView === "staff_portal" && staffTab === "my_expenses"}
+                  onClick={() => handleStaffNav("my_expenses")}
+                  isCollapsed={isCollapsed}
+                />
+                <NavItem
+                  label="Reimbursements"
+                  icon={<BadgeIndianRupee className="w-4 h-4 text-emerald-400" />}
+                  active={currentView === "staff_portal" && staffTab === "reimbursements"}
+                  onClick={() => handleStaffNav("reimbursements")}
+                  isCollapsed={isCollapsed}
+                />
+                <NavItem
+                  label="Notifications"
+                  icon={<Bell className="w-4 h-4" />}
+                  active={currentView === "staff_portal" && staffTab === "notifications"}
+                  onClick={() => handleStaffNav("notifications")}
+                  isCollapsed={isCollapsed}
+                />
+                <NavItem
+                  label="My Profile"
+                  icon={<UserCircle className="w-4 h-4" />}
+                  active={currentView === "staff_portal" && staffTab === "profile"}
+                  onClick={() => handleStaffNav("profile")}
+                  isCollapsed={isCollapsed}
+                />
+              </>
+            ) : (
+              <>
+                {canViewOverview && (
+                  <NavItem
+                    label="Overview"
+                    icon={<LayoutDashboard className="w-4 h-4" />}
+                    active={currentView === "overview"}
+                    onClick={() => handleNav("overview")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
 
-            <NavItem
-              label="Quotation System"
-              icon={<FileText className="w-4 h-4" />}
-              active={currentView === "quotation"}
-              onClick={() => handleNav("quotation")}
-              isCollapsed={isCollapsed}
-            />
+                {canViewQuotations && (
+                  <NavItem
+                    label="Quotation System"
+                    icon={<FileText className="w-4 h-4" />}
+                    active={currentView === "quotation"}
+                    onClick={() => handleNav("quotation")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
 
-            {canUseMail && (
-              <NavItem
-                label="Mail Center"
-                icon={<Mail className="w-4 h-4 text-emerald-500" />}
-                active={currentView === "mail"}
-                onClick={() => handleNav("mail")}
-                isCollapsed={isCollapsed}
-              />
-            )}
+                {canUseMail && (
+                  <NavItem
+                    label="Mail Center"
+                    icon={<Mail className="w-4 h-4 text-emerald-500" />}
+                    active={currentView === "mail"}
+                    onClick={() => handleNav("mail")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
 
-            {/* {onOpenVendorManagement && canViewVendors && (
-              <NavItem
-                label="PO Vendors"
-                icon={<Building2 className="w-4 h-4 text-amber-500" />}
-                onClick={() => {
-                  onOpenVendorManagement();
-                  if (onClose) onClose();
-                }}
-                isCollapsed={isCollapsed}
-              />
-            )}
+                {canViewFinance && (
+                  <NavItem
+                    label="Finance & Operations"
+                    icon={<Wallet className="w-4 h-4 text-amber-400" />}
+                    active={currentView === "finance"}
+                    onClick={() => handleNav("finance")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
 
-            {onOpenAuditLogs && canViewAuditLogs && (
-              <NavItem
-                label="Audit Logs"
-                icon={<ScrollText className="w-4 h-4 text-indigo-400" />}
-                onClick={() => {
-                  onOpenAuditLogs();
-                  if (onClose) onClose();
-                }}
-                isCollapsed={isCollapsed}
-              />
-            )} */}
+                {canViewOwnExpenses && (
+                  <NavItem
+                    label="My Expenses"
+                    icon={<Receipt className="w-4 h-4 text-cyan-400" />}
+                    active={currentView === "staff_portal"}
+                    onClick={() => handleStaffNav("dashboard")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
 
-            {canOpenSettings && (
-              <NavItem
-                label="Admin Settings"
-                icon={<Settings className="w-4 h-4 text-sky-400" />}
-                active={currentView === "settings"}
-                onClick={() => handleNav("settings")}
-                isCollapsed={isCollapsed}
-              />
+                {canOpenSettings && (
+                  <NavItem
+                    label="Admin Settings"
+                    icon={<Settings className="w-4 h-4 text-sky-400" />}
+                    active={currentView === "settings"}
+                    onClick={() => handleNav("settings")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
+              </>
             )}
           </nav>
         </div>

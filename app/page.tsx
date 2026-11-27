@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
-import Sidebar from "../components/Sidebar";
+import Sidebar, { AppView } from "../components/Sidebar";
 import Header from "../components/Header";
 import Overview from "../components/Overview";
 import QuotationSystem from "../components/QuotationSystem";
@@ -12,6 +12,9 @@ import PasswordChangeModal from "../components/PasswordChangeModal";
 import AuditLogsModal from "../components/AuditLogsModal";
 import MailCenter, { MailComposeSeed } from "../components/MailCenter";
 import AdminSettingsView from "../components/AdminSettingsView";
+import FinanceOperationsView from "../components/FinanceOperationsView";
+import StaffPortalView, { StaffPortalTab } from "../components/StaffPortalView";
+import { FinancialYearProvider } from "../contexts/FinancialYearContext";
 import Page1Technical from "../components/Page1Technical";
 import CommercialOffer from "../components/CommercialOffer";
 import ProformaInvoice from "../components/ProformaInvoice";
@@ -19,7 +22,7 @@ import TaxInvoice from "../components/TaxInvoice";
 import PurchaseOrderComponent from "../components/PurchaseOrder";
 import LoginScreen from "../components/LoginScreen";
 import { CompanyInfo, Quotation, SpecProfile, User, Vendor } from "../lib/types";
-import { hasPermission } from "../lib/permissions";
+import { hasPermission, normalizeRole } from "../lib/permissions";
 import { initialData } from "../lib/mock-data";
 import { initialVendors } from "../lib/sample-data";
 import {
@@ -35,8 +38,17 @@ import {
 } from "../lib/vba-engine";
 import { exportElementsToPdf } from "../lib/pdf-export";
 
+function defaultViewForRole(user: User | null): AppView {
+  const r = normalizeRole(user?.role);
+  if (r === "Staff") return "staff_portal";
+  if (r === "Accounts") return "finance";
+  if (r === "Sales") return "quotation";
+  return "overview";
+}
+
 export default function Home() {
-  const [currentView, setCurrentView] = useState<"overview" | "quotation" | "mail" | "settings">("quotation");
+  const [currentView, setCurrentView] = useState<AppView>("quotation");
+  const [staffTab, setStaffTab] = useState<StaffPortalTab>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -606,6 +618,7 @@ export default function Home() {
     }
   ) {
     setCurrentUser(user);
+    setCurrentView(defaultViewForRole(user));
     const forcedChange = Boolean(sessionInfo?.mustChangePassword || user.must_change_password);
     setMustChangePassword(forcedChange);
     setPasswordExpiresAt(sessionInfo?.passwordExpiresAt || user.password_expires_at || null);
@@ -717,6 +730,19 @@ export default function Home() {
   const canExportPdf = hasPermission(currentUser, "quotations.export");
   const canSendEmail = hasPermission(currentUser, "mail.send");
   const canDeleteQuotation = hasPermission(currentUser, "quotations.delete");
+  const canonicalRole = normalizeRole(currentUser.role);
+  const canViewFinance =
+    hasPermission(currentUser, "finance.dashboard") ||
+    hasPermission(currentUser, "finance.orders") ||
+    hasPermission(currentUser, "expenses.view");
+  const effectiveView: AppView =
+    canonicalRole === "Staff"
+      ? "staff_portal"
+      : currentView === "finance" && !canViewFinance
+      ? defaultViewForRole(currentUser)
+      : currentView === "settings" && canonicalRole !== "Admin"
+      ? defaultViewForRole(currentUser)
+      : currentView;
 
   function openMailForQuotation(
     q: Quotation,
@@ -747,7 +773,7 @@ export default function Home() {
   }
 
   return (
-    <>
+    <FinancialYearProvider>
       {/* ============================================================ */}
       {/* 1. INTERACTIVE SCREEN UI ROOT CONTAINER                      */}
       {/* ============================================================ */}
@@ -759,11 +785,13 @@ export default function Home() {
       >
         {/* Left Sidebar */}
         <Sidebar
-          currentView={currentView}
+          currentView={effectiveView}
           onSelectView={(v) => {
             setCurrentView(v);
             setMobileMenuOpen(false);
           }}
+          staffTab={staffTab}
+          onSelectStaffTab={(t) => setStaffTab(t)}
           currentUser={currentUser}
           theme={theme}
           collapsed={sidebarCollapsed}
@@ -795,20 +823,28 @@ export default function Home() {
         >
           <Header
             title={
-              currentView === "overview"
+              effectiveView === "overview"
                 ? "Overview"
-                : currentView === "mail"
+                : effectiveView === "finance"
+                ? "Finance & Operations"
+                : effectiveView === "staff_portal"
+                ? "Staff Portal"
+                : effectiveView === "mail"
                 ? "Zoho Mail Center"
-                : currentView === "settings"
+                : effectiveView === "settings"
                 ? "Admin Settings"
                 : "Quotations"
             }
             subtitle={
-              currentView === "overview"
+              effectiveView === "overview"
                 ? "Executive summary & all quotations"
-                : currentView === "mail"
+                : effectiveView === "finance"
+                ? "Orders, receivables, expenses, reimbursements & reports"
+                : effectiveView === "staff_portal"
+                ? "Quick expense claims, approvals & reimbursements"
+                : effectiveView === "mail"
                 ? "Integrated Zoho SMTP, templates & AI assistant"
-                : currentView === "settings"
+                : effectiveView === "settings"
                 ? "Encrypted SMTP, AI Assistant, storage & security"
                 : "Proposals and scope estimates"
             }
@@ -864,7 +900,7 @@ export default function Home() {
             </div>
           )}
 
-          {currentView === "overview" ? (
+          {effectiveView === "overview" ? (
             <div className="w-full flex-1">
               <Overview
                 quotations={quotations}
@@ -883,6 +919,7 @@ export default function Home() {
                   setCurrentView("quotation");
                 }}
                 onOpenVendorModal={() => setIsVendorModalOpen(true)}
+                onNavigateFinance={canViewFinance ? () => setCurrentView("finance") : undefined}
                 onPrintQuotation={(q) => {
                   setCurrentQuote(q);
                   setTimeout(() => handleExportQuotation(), 100);
@@ -896,7 +933,24 @@ export default function Home() {
                 }}
               />
             </div>
-          ) : currentView === "mail" ? (
+          ) : effectiveView === "finance" && canViewFinance ? (
+            <div className="w-full flex-1">
+              <FinanceOperationsView
+                currentUser={currentUser}
+                quotations={quotations}
+                theme={theme}
+              />
+            </div>
+          ) : effectiveView === "staff_portal" ? (
+            <div className="w-full flex-1">
+              <StaffPortalView
+                currentUser={currentUser}
+                theme={theme}
+                activeTab={staffTab}
+                onTabChange={(t) => setStaffTab(t)}
+              />
+            </div>
+          ) : effectiveView === "mail" ? (
             <div className="w-full flex-1 flex flex-col">
               <MailCenter
                 theme={theme}
@@ -1061,6 +1115,6 @@ export default function Home() {
           />
         </div>
       </div>
-    </>
+    </FinancialYearProvider>
   );
 }

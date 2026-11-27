@@ -9,7 +9,8 @@ import {
   revokeAllUserSessions,
   validatePasswordStrength,
 } from "@/lib/auth";
-import { DEFAULT_STAFF_PERMISSIONS, normalizeRole } from "@/lib/permissions";
+import { DEFAULT_STAFF_PERMISSIONS, getDefaultPermissionsForRole, normalizeRole } from "@/lib/permissions";
+import { generateNextEmployeeId } from "@/lib/employee-id";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
         ? null
         : Array.isArray(permissions)
         ? permissions
-        : DEFAULT_STAFF_PERMISSIONS;
+        : getDefaultPermissionsForRole(canonicalRole);
     const createdAt = new Date().toISOString().slice(0, 10);
     const nowIso = new Date().toISOString();
     const expiresIso = new Date(Date.now() + DEFAULT_PASSWORD_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -130,8 +131,42 @@ export async function POST(req: NextRequest) {
       { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" }
     );
 
+    let employeeId: string | null = null;
+    if (canonicalRole !== "Admin" || body.createEmployeeProfile === true) {
+      try {
+        const epCheck = await query(
+          `SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='employee_profiles'`,
+          []
+        );
+        if (epCheck && epCheck.rows.length > 0) {
+          const gen = await generateNextEmployeeId(body.joiningDate || body.joining_date || null);
+          employeeId = gen.employeeId;
+          await query(
+            `INSERT INTO employee_profiles (id, user_id, employee_id, full_name, email, mobile, designation, department, role, joining_date, employment_status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Active',$11)
+             ON CONFLICT (user_id) DO NOTHING`,
+            [
+              `emp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              id,
+              employeeId,
+              name.trim(),
+              email.toLowerCase().trim(),
+              body.mobile ? String(body.mobile).trim() : null,
+              body.designation ? String(body.designation).trim() : null,
+              body.department ? String(body.department).trim() : null,
+              canonicalRole.toUpperCase(),
+              gen.joiningDate,
+              admin.email,
+            ]
+          );
+        }
+      } catch (e) {
+        console.warn("Could not auto-create employee profile:", e);
+      }
+    }
+
     if (res && res.rows.length > 0) {
-      return NextResponse.json(res.rows[0]);
+      return NextResponse.json({ ...res.rows[0], employee_id: employeeId });
     }
     return NextResponse.json({ id, email, name, role: canonicalRole, status: "active", created_at: createdAt });
   } catch (err: any) {

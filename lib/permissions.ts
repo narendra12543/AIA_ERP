@@ -1,6 +1,6 @@
 import { User } from "./types";
 
-export type CanonicalRole = "Admin" | "Staff";
+export type CanonicalRole = "Admin" | "Sales" | "Accounts" | "Staff";
 
 export type PermissionKey =
   | "overview.view"
@@ -41,9 +41,20 @@ export type PermissionKey =
   | "database.export"
   | "database.import"
   | "security.manage"
+  | "finance.dashboard"
+  | "finance.orders"
+  | "finance.payments"
+  | "finance.reports"
+  | "finance.accounts"
+  | "finance.export"
+  | "employees.manage"
   | "expenses.view"
+  | "expenses.view_own"
   | "expenses.create"
+  | "expenses.submit"
+  | "expenses.review"
   | "expenses.approve"
+  | "expenses.reimburse"
   | "expenses.export";
 
 export interface PermissionGroup {
@@ -110,50 +121,102 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    category: "Finance & Operations",
+    items: [
+      { key: "finance.dashboard", label: "Financial Dashboard", description: "Access Finance & Operations KPIs and charts" },
+      { key: "finance.orders", label: "Completed Orders", description: "Convert quotations and manage financial orders" },
+      { key: "finance.payments", label: "Customer Payments", description: "Record and reverse customer receipts" },
+      { key: "finance.accounts", label: "Accounts & Cash Flow", description: "Manage Cash/Bank register transactions" },
+      { key: "finance.reports", label: "Financial Reports", description: "View financial & profitability reports" },
+      { key: "finance.export", label: "Export Financial Data", description: "Export authorized CSV/Excel financial reports" },
+      { key: "employees.manage", label: "Manage Employees", description: "View and update employee profiles & IDs" },
+    ],
+  },
+  {
+    category: "Employee Expense Management",
+    items: [
+      { key: "expenses.submit", label: "Submit Own Expenses", description: "Submit personal expense claims and receipts" },
+      { key: "expenses.view_own", label: "View Own Expenses", description: "View own expense and reimbursement history" },
+      { key: "expenses.view", label: "View All Expenses", description: "View company-wide expense register" },
+      { key: "expenses.create", label: "Create Expense Entries", description: "Create expense entries" },
+      { key: "expenses.review", label: "Review Expenses", description: "Review and classify employee claims" },
+      { key: "expenses.approve", label: "Approve Expenses", description: "Approve, reject, or request changes on claims" },
+      { key: "expenses.reimburse", label: "Record Reimbursements", description: "Record employee reimbursement payouts" },
+      { key: "expenses.export", label: "Export Expense Reports", description: "Export monthly/FY expense summaries" },
+    ],
+  },
+  {
     category: "Administration & Security",
     items: [
       { key: "users.manage", label: "Manage Users", description: "Create, activate/deactivate, reset passwords" },
-      { key: "permissions.manage", label: "Manage Permissions", description: "Configure Staff role permissions" },
+      { key: "permissions.manage", label: "Manage Permissions", description: "Configure role and user permissions" },
       { key: "audit_logs.view", label: "View Audit Logs", description: "Inspect security and business audit logs" },
       { key: "database.export", label: "Export Database", description: "Export quotation database records" },
       { key: "database.import", label: "Import Database", description: "Run Excel/JSON database imports" },
       { key: "security.manage", label: "Security Policies", description: "Configure password expiry and AI policies" },
     ],
   },
-  {
-    category: "Expense Management (Future Ready)",
-    items: [
-      { key: "expenses.view", label: "View Expenses", description: "View project and daily expenses" },
-      { key: "expenses.create", label: "Create Expenses", description: "Submit expense entries and receipts" },
-      { key: "expenses.approve", label: "Approve Expenses", description: "Approve or reject expense claims" },
-      { key: "expenses.export", label: "Export Expense Reports", description: "Export monthly/FY expense summaries" },
-    ],
-  },
 ];
 
 export const ALL_PERMISSIONS: PermissionKey[] = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i.key));
 
-export const DEFAULT_STAFF_PERMISSIONS: PermissionKey[] = [
-  "overview.view",
+export const DEFAULT_SALES_PERMISSIONS: PermissionKey[] = [
+  "quotations.view_own",
   "quotations.view_all",
   "quotations.create",
   "quotations.edit",
+  "quotations.revise",
   "quotations.export",
   "proforma.create",
-  "purchase_order.create",
   "clients.view",
   "clients.add",
-  "vendors.view",
   "spec_profiles.view",
   "mail.view",
   "mail.compose",
   "mail.send",
   "mail.sent_view",
+  "expenses.submit",
+  "expenses.view_own",
+  "expenses.create",
+];
+
+export const DEFAULT_ACCOUNTS_PERMISSIONS: PermissionKey[] = [
+  "finance.dashboard",
+  "finance.orders",
+  "finance.payments",
+  "finance.accounts",
+  "finance.reports",
+  "finance.export",
+  "expenses.view",
+  "expenses.review",
+  "expenses.reimburse",
+  "expenses.submit",
+  "expenses.view_own",
+  "expenses.create",
+  "expenses.export",
+  "clients.view",
+];
+
+export const DEFAULT_STAFF_PERMISSIONS: PermissionKey[] = [
+  "expenses.submit",
+  "expenses.view_own",
+  "expenses.create",
 ];
 
 export function normalizeRole(role?: string | null): CanonicalRole {
   const r = String(role || "").trim().toLowerCase();
-  return r === "admin" ? "Admin" : "Staff";
+  if (r === "admin") return "Admin";
+  if (r === "sales") return "Sales";
+  if (r === "accounts") return "Accounts";
+  return "Staff";
+}
+
+export function getDefaultPermissionsForRole(role?: string | null): PermissionKey[] {
+  const canon = normalizeRole(role);
+  if (canon === "Admin") return ALL_PERMISSIONS;
+  if (canon === "Sales") return DEFAULT_SALES_PERMISSIONS;
+  if (canon === "Accounts") return DEFAULT_ACCOUNTS_PERMISSIONS;
+  return DEFAULT_STAFF_PERMISSIONS;
 }
 
 export function resolveEffectivePermissions(user?: Pick<User, "role" | "permissions"> | null): Set<PermissionKey> {
@@ -164,10 +227,13 @@ export function resolveEffectivePermissions(user?: Pick<User, "role" | "permissi
   if (Array.isArray(user.permissions) && user.permissions.length > 0) {
     return new Set(user.permissions as PermissionKey[]);
   }
-  return new Set(DEFAULT_STAFF_PERMISSIONS);
+  return new Set(getDefaultPermissionsForRole(user.role));
 }
 
-export function hasPermission(user: Pick<User, "role" | "permissions"> | null | undefined, perm: PermissionKey): boolean {
+export function hasPermission(
+  user: Pick<User, "role" | "permissions"> | null | undefined,
+  perm: PermissionKey
+): boolean {
   if (!user) return false;
   if (normalizeRole(user.role) === "Admin") return true;
   return resolveEffectivePermissions(user).has(perm);

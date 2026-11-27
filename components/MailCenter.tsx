@@ -64,6 +64,8 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { useFinancialYear } from "../contexts/FinancialYearContext";
+import { matchesReportingFY } from "../lib/financial-year";
 
 const FontSizeTextStyle = TextStyle.extend({
   addAttributes() {
@@ -177,6 +179,12 @@ export default function MailCenter({
   onOpenAdminSettings,
 }: MailCenterProps) {
   const isDark = theme === "dark";
+  const { selectedFY } = useFinancialYear();
+  const fyFilteredQuotations = useMemo(() => {
+    if (selectedFY === "ALL") return quotations;
+    const filtered = quotations.filter((q) => matchesReportingFY(q.date, q.quotation_no, selectedFY));
+    return filtered.length > 0 ? filtered : quotations;
+  }, [quotations, selectedFY]);
   const canSend = hasPermission(currentUser, "mail.send");
   const canManageTemplates = hasPermission(currentUser, "mail.templates");
   const canManageSignatures = hasPermission(currentUser, "mail.signatures") || canSend;
@@ -1046,7 +1054,7 @@ export default function MailCenter({
                   onChange={(e) => handleLinkedDocumentChange(e.target.value, documentType)}
                   className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
                 >
-                  {quotations.map((q) => (
+                  {fyFilteredQuotations.map((q) => (
                     <option key={q.id || q.quotation_no} value={q.quotation_no}>
                       {q.quotation_no} — {q.client_name}
                     </option>

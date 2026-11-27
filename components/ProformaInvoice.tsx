@@ -304,7 +304,7 @@ export default function ProformaInvoice({ quote, company }: ProformaInvoiceProps
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>HSN/ SAC</div>
               </th>
               <th style={{ width: "90px", padding: 0, borderRight: "1px solid #000000", borderBottom: "1px solid #000000", verticalAlign: "middle", height: "22px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Size(mm)</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Size(Mtr)</div>
               </th>
               <th style={{ width: "48px", padding: 0, borderRight: "1px solid #000000", borderBottom: "1px solid #000000", verticalAlign: "middle", height: "22px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Quantity</div>

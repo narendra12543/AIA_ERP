@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   TrendingUp,
   FileText,
@@ -24,10 +24,13 @@ import {
   HelpCircle,
   Search,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import { Quotation, Vendor, User } from "../lib/types";
 import { inr, formatIsoToDdMmYyyy } from "../lib/vba-engine";
 import { Badge } from "./ui/badge";
+import { useFinancialYear } from "../contexts/FinancialYearContext";
+import { listAvailableFYs, matchesReportingFY, formatFYLabel } from "../lib/financial-year";
 
 interface OverviewProps {
   quotations: Quotation[];
@@ -37,6 +40,7 @@ interface OverviewProps {
   onOpenQuotation: (q: Quotation) => void;
   onNewQuotation: () => void;
   onOpenVendorModal?: () => void;
+  onNavigateFinance?: () => void;
   onPrintQuotation?: (q: Quotation) => void;
   onSendEmail?: (q: Quotation) => void;
   onSendWhatsApp?: (q: Quotation) => void;
@@ -54,6 +58,7 @@ export default function Overview({
   onOpenQuotation,
   onNewQuotation,
   onOpenVendorModal,
+  onNavigateFinance,
   onPrintQuotation,
   onSendEmail,
   onSendWhatsApp,
@@ -63,13 +68,55 @@ export default function Overview({
   canDeleteQuotation = false,
 }: OverviewProps) {
   const isDark = theme === "dark";
-  const [fyFilter, setFyFilter] = useState<string>("all");
+  const { selectedFY, setSelectedFY, currentFY, resetToCurrentFY } = useFinancialYear();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [revisionFilter, setRevisionFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
   const [pageSize, setPageSize] = useState<number>(25);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [financeData, setFinanceData] = useState<{
+    tableMissing?: boolean;
+    kpis?: {
+      uniqueClients: number;
+      convertedOrders: number;
+      confirmedOrders: number;
+      completedOrders: number;
+      basicTurnover: number;
+      gstInclusiveValue: number;
+      customerReceived: number;
+      selectedFYOutstanding: number;
+      lifetimeOutstanding: number;
+      grossProfit: number;
+      operatingExpenses: number;
+      otherIncome: number;
+      netProfit: number;
+      cashBalance: number;
+      pendingApprovalsCount?: number;
+      pendingApprovalsAmount?: number;
+      purchaseOrdersCount?: number;
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const loadFinance = async () => {
+      try {
+        const res = await fetch(`/api/finance/dashboard?fy=${encodeURIComponent(selectedFY)}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (active) setFinanceData(json);
+      } catch {
+        // Non-fatal: Overview falls back to quotation metrics
+      }
+    };
+    loadFinance();
+    return () => {
+      active = false;
+    };
+  }, [selectedFY]);
 
   // Theme tokens
   const cardBg = isDark
@@ -80,20 +127,16 @@ export default function Overview({
   const textHeader = isDark ? "text-white" : "text-zinc-950";
   const rowHover = isDark ? "hover:bg-zinc-900/80" : "hover:bg-zinc-100/80";
 
+  const availableFYs = useMemo(() => {
+    const dates = quotations.map((q) => q.date || "").filter(Boolean);
+    return listAvailableFYs(dates, currentFY);
+  }, [quotations, currentFY]);
+
   // Financial Year Filter
   const filteredQuotes = useMemo(() => {
-    if (fyFilter === "all") return quotations;
-    if (fyFilter === "26-27") {
-      return quotations.filter((q) => {
-        const d = q.date || "";
-        return d.startsWith("2026") || d.startsWith("2027") || (q.quotation_no || "").includes("26-27");
-      });
-    }
-    if (fyFilter === "25-26") {
-      return quotations.filter((q) => (q.date || "").startsWith("2025") || (q.quotation_no || "").includes("25-26"));
-    }
-    return quotations;
-  }, [quotations, fyFilter]);
+    if (selectedFY === "ALL") return quotations;
+    return quotations.filter((q) => matchesReportingFY(q.date, q.quotation_no, selectedFY));
+  }, [quotations, selectedFY]);
 
   // Real Database Business Metrics (No duplicate counting)
   const metrics = useMemo(() => {
@@ -292,15 +335,30 @@ export default function Overview({
           <div className="flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 bg-zinc-900 border-zinc-800 text-xs text-zinc-300">
             <Calendar className="w-3.5 h-3.5 text-amber-500" />
             <select
-              value={fyFilter}
-              onChange={(e) => setFyFilter(e.target.value)}
+              aria-label="Global Financial Year"
+              value={selectedFY}
+              onChange={(e) => {
+                setSelectedFY(e.target.value);
+                setCurrentPage(1);
+              }}
               className="bg-transparent text-xs text-white focus:outline-none cursor-pointer"
             >
-              <option value="all" className="bg-zinc-900 text-white">All Records ({quotations.length})</option>
-              <option value="26-27" className="bg-zinc-900 text-white">FY 2026-27</option>
-              <option value="25-26" className="bg-zinc-900 text-white">FY 2025-26</option>
+              {availableFYs.map((fy) => (
+                <option key={fy} value={fy} className="bg-zinc-900 text-white">
+                  {fy === currentFY ? `${formatFYLabel(fy)} (Current)` : formatFYLabel(fy)}
+                </option>
+              ))}
+              <option value="ALL" className="bg-zinc-900 text-white">All Financial Years ({quotations.length})</option>
             </select>
           </div>
+          {selectedFY !== currentFY && (
+            <button
+              onClick={resetToCurrentFY}
+              className="text-[11px] px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition cursor-pointer font-semibold"
+            >
+              Reset to {formatFYLabel(currentFY)}
+            </button>
+          )}
 
           <button
             onClick={onNewQuotation}
@@ -312,22 +370,35 @@ export default function Overview({
         </div>
       </div>
 
-      {/* 2. 4-Column Responsive KPI Cards (Total Business Value, Outstanding Payments, Total Invoiced, Active Purchase Orders) */}
+      {/* 2. 4-Column Responsive KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Total Business Value */}
+        {/* KPI 1: Total Turnover (Excl. GST) / Pipeline */}
         <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
           <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>Total Business Value</span>
+            <span className={`text-xs font-semibold ${textMuted}`}>
+              {financeData?.kpis ? "Total Turnover (Excl. GST)" : "Total Business Value"}
+            </span>
             <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black font-mono tracking-tight text-white">
-            {inr.format(metrics.totalBusinessValue).replace(/\.00$/, "")}
+          <div className={`text-2xl font-black font-mono tracking-tight ${textHeader}`}>
+            {inr
+              .format(financeData?.kpis ? financeData.kpis.basicTurnover : metrics.totalBusinessValue)
+              .replace(/\.00$/, "")}
           </div>
-          <p className="text-[11px] text-zinc-400 mt-1.5 flex items-center gap-1 font-medium">
-            <span className="text-emerald-400 font-bold">{metrics.totalCount} Proposals</span>
-            <span>in commercial pipeline</span>
+          <p className={`text-[11px] ${textMuted} mt-1.5 flex items-center gap-1 font-medium`}>
+            {financeData?.kpis ? (
+              <>
+                <span className="text-emerald-400 font-bold">{financeData.kpis.convertedOrders} Orders</span>
+                <span>&bull; Pipeline: {inr.format(metrics.totalBusinessValue).replace(/\.00$/, "")}</span>
+              </>
+            ) : (
+              <>
+                <span className="text-emerald-400 font-bold">{metrics.totalCount} Proposals</span>
+                <span>in commercial pipeline</span>
+              </>
+            )}
           </p>
         </div>
 
@@ -340,27 +411,40 @@ export default function Overview({
             </div>
           </div>
           <div className="text-2xl font-black font-mono tracking-tight text-rose-400">
-            {inr.format(metrics.outstandingPayments).replace(/\.00$/, "")}
+            {inr
+              .format(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : metrics.outstandingPayments)
+              .replace(/\.00$/, "")}
           </div>
-          <p className="text-[11px] text-zinc-400 mt-1.5 flex items-center gap-1 font-medium">
-            <span>Collected:</span>
-            <span className="text-emerald-400 font-bold font-mono">{inr.format(metrics.totalAdvance)}</span>
+          <p className={`text-[11px] ${textMuted} mt-1.5 flex items-center gap-1 font-medium flex-wrap`}>
+            <span>Received:</span>
+            <span className="text-emerald-400 font-bold font-mono">
+              {inr.format(financeData?.kpis ? financeData.kpis.customerReceived : metrics.totalAdvance).replace(/\.00$/, "")}
+            </span>
+            {financeData?.kpis && selectedFY !== "ALL" && (
+              <span>&bull; Lifetime: {inr.format(financeData.kpis.lifetimeOutstanding).replace(/\.00$/, "")}</span>
+            )}
           </p>
         </div>
 
-        {/* KPI 3: Total Invoiced */}
+        {/* KPI 3: Net Profit & Expenses (or Total Invoiced) */}
         <div className={`p-5 rounded-xl border ${cardBg} transition-all duration-200 relative overflow-hidden group`}>
           <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-xs font-semibold ${textMuted}`}>Total Invoiced</span>
+            <span className={`text-xs font-semibold ${textMuted}`}>
+              {financeData?.kpis ? "Net Profit" : "Total Invoiced"}
+            </span>
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Receipt className="w-4 h-4" />
+              {financeData?.kpis ? <Wallet className="w-4 h-4" /> : <Receipt className="w-4 h-4" />}
             </div>
           </div>
-          <div className="text-2xl font-black font-mono tracking-tight text-white">
-            {inr.format(metrics.totalInvoiced).replace(/\.00$/, "")}
+          <div className={`text-2xl font-black font-mono tracking-tight ${financeData?.kpis && financeData.kpis.netProfit < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+            {inr
+              .format(financeData?.kpis ? financeData.kpis.netProfit : metrics.totalInvoiced)
+              .replace(/\.00$/, "")}
           </div>
-          <p className="text-[11px] text-zinc-400 mt-1.5 font-medium">
-            Issued via Official Tax Invoices & PIs
+          <p className={`text-[11px] ${textMuted} mt-1.5 font-medium`}>
+            {financeData?.kpis
+              ? `Expenses: ${inr.format(financeData.kpis.operatingExpenses).replace(/\.00$/, "")} • Cash: ${inr.format(financeData.kpis.cashBalance).replace(/\.00$/, "")}`
+              : "Issued via Official Tax Invoices & PIs"}
           </p>
         </div>
 
@@ -372,11 +456,15 @@ export default function Overview({
               <Building2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black font-mono tracking-tight text-white">
+          <div className={`text-2xl font-black font-mono tracking-tight ${textHeader}`}>
             {metrics.vendorsCount} <span className="text-sm font-normal text-zinc-400">Vendors</span>
           </div>
           <div className="mt-1.5 flex items-center justify-between">
-            <span className="text-[11px] text-zinc-400 font-medium">Registered PO Suppliers</span>
+            <span className={`text-[11px] ${textMuted} font-medium`}>
+              {financeData?.kpis?.pendingApprovalsCount
+                ? `${financeData.kpis.pendingApprovalsCount} Expense Approvals`
+                : "Registered PO Suppliers"}
+            </span>
             {onOpenVendorModal && (
               <button
                 onClick={onOpenVendorModal}
@@ -388,6 +476,38 @@ export default function Overview({
           </div>
         </div>
       </div>
+
+      {/* Compact Secondary Finance Strip when Finance & Operations data is active */}
+      {financeData?.kpis && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between`}>
+            <div>
+              <p className={`text-[11px] font-medium ${textMuted}`}>Customer Received ({formatFYLabel(selectedFY)})</p>
+              <p className={`text-sm font-bold font-mono ${textHeader}`}>{inr.format(financeData.kpis.customerReceived)}</p>
+            </div>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between`}>
+            <div>
+              <p className={`text-[11px] font-medium ${textMuted}`}>Total Expenses ({formatFYLabel(selectedFY)})</p>
+              <p className={`text-sm font-bold font-mono ${textHeader}`}>{inr.format(financeData.kpis.operatingExpenses)}</p>
+            </div>
+            <Receipt className="w-4 h-4 text-amber-400" />
+          </div>
+          <div
+            onClick={onNavigateFinance}
+            className={`px-4 py-3 rounded-xl border ${subCardBg} flex items-center justify-between ${onNavigateFinance ? "cursor-pointer hover:border-amber-500/40" : ""}`}
+          >
+            <div>
+              <p className={`text-[11px] font-medium ${textMuted}`}>Pending Expense Approvals</p>
+              <p className={`text-sm font-bold font-mono ${financeData.kpis.pendingApprovalsCount ? "text-amber-400" : textHeader}`}>
+                {financeData.kpis.pendingApprovalsCount || 0} Claims ({inr.format(financeData.kpis.pendingApprovalsAmount || 0)})
+              </p>
+            </div>
+            <ArrowUpRight className="w-4 h-4 text-amber-400" />
+          </div>
+        </div>
+      )}
 
       {/* 3. Balanced Two-Column Row: Business Performance Chart & Action Required */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -284,7 +284,7 @@ export default function TaxInvoice({ quote, company }: TaxInvoiceProps) {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>HSN/ SAC</div>
               </th>
               <th style={{ width: "90px", padding: 0, borderRight: "1px solid #000000", borderBottom: "1px solid #000000", verticalAlign: "middle", height: "22px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Size(mm)</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Size(Mtr)</div>
               </th>
               <th style={{ width: "48px", padding: 0, borderRight: "1px solid #000000", borderBottom: "1px solid #000000", verticalAlign: "middle", height: "22px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "22px", color: "#ffffff", fontWeight: "bold" }}>Quantity</div>
@@ -592,13 +592,9 @@ export default function TaxInvoice({ quote, company }: TaxInvoiceProps) {
             <div><strong>Branch:</strong> {company.branch || ""}</div>
           </div>
           <div style={{ flex: 1, padding: "6px 10px", borderRight: "1px solid #000000", lineHeight: 1.4 }}>
-            <div style={{ fontWeight: 900, fontSize: "9px", marginBottom: "2px" }}>MATERIAL SPECIFICATION & DECLARATION:</div>
-            <div style={{ fontSize: "8px", lineHeight: 1.35 }}>
-              • Warranty: 1 Year against manufacturing defects. No warranty for damage due to unstable power supply.
-            </div>
-            <div style={{ fontSize: "7.5px", color: "#333", marginTop: "3px", lineHeight: 1.25 }}>
-              We declare that this invoice shows actual price of the goods described and all particulars are true and correct.
-            </div>
+            <div style={{ fontWeight: 900, fontSize: "9px", marginBottom: "2px" }}>We declare that this invoice shows actual price of the goods described and all particulars are true and correct.</div>
+            
+          
           </div>
           <div style={{ width: "185px", padding: "6px 10px", display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "center", textAlign: "center" }}>
             <div style={{ fontWeight: 900, fontSize: "9px" }}>AVEN INDUSTRIAL AUTOMATION</div>

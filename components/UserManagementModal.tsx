@@ -21,6 +21,7 @@ import {
   DEFAULT_STAFF_PERMISSIONS,
   PERMISSION_GROUPS,
   PermissionKey,
+  getDefaultPermissionsForRole,
   normalizeRole,
 } from "../lib/permissions";
 
@@ -42,7 +43,10 @@ export default function UserManagementModal({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"Admin" | "Staff">("Staff");
+  const [role, setRole] = useState<"Admin" | "Sales" | "Accounts" | "Staff">("Staff");
+  const [designation, setDesignation] = useState("");
+  const [department, setDepartment] = useState("");
+  const [joiningDate, setJoiningDate] = useState("");
   const [mustChangeOnFirst, setMustChangeOnFirst] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingPermUser, setEditingPermUser] = useState<User | null>(null);
@@ -86,18 +90,28 @@ export default function UserManagementModal({
           email,
           password,
           role,
+          designation: designation.trim() || undefined,
+          department: department.trim() || undefined,
+          joiningDate: joiningDate || undefined,
           mustChangePassword: mustChangeOnFirst,
-          permissions: role === "Staff" ? DEFAULT_STAFF_PERMISSIONS : undefined,
+          permissions: getDefaultPermissionsForRole(role),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setActionError(data.error || "Failed to create user.");
       } else {
-        setActionSuccess(`User ${email} created.`);
+        setActionSuccess(
+          data.employeeId
+            ? `User ${email} created (${data.employeeId}).`
+            : `User ${email} created.`
+        );
         setName("");
         setEmail("");
         setPassword("");
+        setDesignation("");
+        setDepartment("");
+        setJoiningDate("");
         setShowAddForm(false);
         onRefreshUsers();
       }
@@ -343,12 +357,34 @@ export default function UserManagementModal({
                   <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Role</label>
                   <select
                     value={role}
-                    onChange={(e) => setRole(e.target.value as "Admin" | "Staff")}
+                    onChange={(e) => setRole(e.target.value as "Admin" | "Sales" | "Accounts" | "Staff")}
                     className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white"
                   >
-                    <option value="Staff">Staff (Permission-Scoped)</option>
-                    <option value="Admin">Admin (Full Access)</option>
+                    <option value="Staff">Staff (Staff Portal &amp; Own Expenses)</option>
+                    <option value="Sales">Sales (Quotations, Mail &amp; Own Expenses)</option>
+                    <option value="Accounts">Accounts (Finance, Approvals &amp; Reports)</option>
+                    <option value="Admin">Admin (Full Enterprise Access)</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Designation (Optional)</label>
+                  <input
+                    type="text"
+                    value={designation}
+                    onChange={(e) => setDesignation(e.target.value)}
+                    placeholder="e.g. Site Engineer"
+                    className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Department (Optional)</label>
+                  <input
+                    type="text"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    placeholder="e.g. Operations / Sales / Accounts"
+                    className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white"
+                  />
                 </div>
               </div>
               <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
