@@ -127,6 +127,12 @@ export async function POST(req: NextRequest) {
     if (!plainText && !safeHtml) {
       return NextResponse.json({ error: "Email body cannot be empty." }, { status: 400 });
     }
+    if (/\[REDACTED_[A-Z_]+\]|AVEN_PROT_\d+/i.test(safeHtml + " " + subject)) {
+      return NextResponse.json(
+        { error: "Blocked: Email contains unresolved redaction placeholders. Please restore actual values before sending." },
+        { status: 400 }
+      );
+    }
 
     // Validate attachments
     const rawAttachments = Array.isArray(body.attachments) ? body.attachments : [];

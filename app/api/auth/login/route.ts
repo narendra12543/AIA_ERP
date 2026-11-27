@@ -1,15 +1,20 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { query, initDb, isProduction } from "@/lib/db";
 import { defaultUsers } from "@/lib/sample-data";
 import { User } from "@/lib/types";
 import {
   DEFAULT_PASSWORD_EXPIRY_DAYS,
+  ENABLE_MANDATORY_MFA,
   ENABLE_PASSWORD_EXPIRY,
   verifyPassword,
   checkRateLimit,
   recordFailedLogin,
   resetLoginAttempts,
   createSession,
+  createSecurityAlert,
+  extractTrustedIp,
+  hashToken,
   logAudit,
 } from "@/lib/auth";
 import { normalizeRole, resolveEffectivePermissions } from "@/lib/permissions";
@@ -29,10 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clientIp =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
+    const clientIp = extractTrustedIp(req);
     const ipRateKey = `ip:${clientIp}`;
 
     // Distributed Rate Limiting (Account + IP)
@@ -64,10 +66,15 @@ export async function POST(req: NextRequest) {
     let policyDays = DEFAULT_PASSWORD_EXPIRY_DAYS;
     let fromDatabase = false;
 
+    let mfaEnabled = false;
+    let approvalStatus = "Approved";
+
     const dbRes = await query(`SELECT * FROM users WHERE LOWER(email) = $1`, [trimmedEmail]);
     if (dbRes && dbRes.rows.length > 0) {
       fromDatabase = true;
       const row = dbRes.rows[0];
+      mfaEnabled = Boolean(row.mfa_enabled);
+      approvalStatus = row.approval_status || "Approved";
       policyDays = Number(row.password_policy_days || DEFAULT_PASSWORD_EXPIRY_DAYS) || DEFAULT_PASSWORD_EXPIRY_DAYS;
       passwordExpiresAt = row.password_expires_at ? new Date(row.password_expires_at).toISOString() : null;
       const expiredByDate =
@@ -108,10 +115,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (userRecord.status === "inactive") {
-      await logAudit(userRecord.id, "LOGIN_BLOCKED_INACTIVE", { email: trimmedEmail }, { actorName: userRecord.name, module: "auth", outcome: "BLOCKED" });
+    if (approvalStatus !== "Approved") {
+      await logAudit(userRecord.id, "LOGIN_BLOCKED_UNAPPROVED", { email: trimmedEmail, approvalStatus }, { actorName: userRecord.name, module: "auth", outcome: "BLOCKED" });
       return NextResponse.json(
-        { error: "This account has been disabled. Please contact the ERP administrator." },
+        {
+          error: `Account access is restricted (${approvalStatus}). Explicit Administrator approval is required.`,
+          code: "ACCOUNT_NOT_APPROVED",
+          approvalStatus,
+        },
+        { status: 403 }
+      );
+    }
+
+    if (userRecord.status !== "active") {
+      await logAudit(userRecord.id, "LOGIN_BLOCKED_INACTIVE", { email: trimmedEmail, status: userRecord.status }, { actorName: userRecord.name, module: "auth", outcome: "BLOCKED" });
+      return NextResponse.json(
+        { error: `This account is currently ${userRecord.status}. Please contact the ERP administrator.` },
         { status: 403 }
       );
     }
@@ -126,6 +145,13 @@ export async function POST(req: NextRequest) {
         { email: trimmedEmail, ip: clientIp },
         { actorName: userRecord.name, module: "auth", outcome: "FAILURE" }
       );
+      void createSecurityAlert({
+        severity: "warning",
+        category: "failed_login",
+        title: "Failed Login Attempt",
+        message: `Invalid password attempt for ${trimmedEmail} from IP ${clientIp}.`,
+        actorEmail: trimmedEmail,
+      });
       return NextResponse.json(
         { error: "Invalid credentials. Please verify your email and password." },
         { status: 401 }
@@ -135,6 +161,39 @@ export async function POST(req: NextRequest) {
     // Login succeeded: reset rate limits
     await resetLoginAttempts(trimmedEmail);
     await resetLoginAttempts(ipRateKey);
+
+    // If MFA is enrolled (or mandatory MFA active), issue short-lived challenge WITHOUT granting an ERP session
+    if (fromDatabase && (mfaEnabled || ENABLE_MANDATORY_MFA)) {
+      if (!mfaEnabled) {
+        // Admin/User must enroll MFA first via secure challenge? If mandatory MFA is enabled before enrollment, block safely with clear code
+        return NextResponse.json(
+          {
+            error: "MFA enrollment is required before accessing the ERP. Contact Administrator.",
+            code: "MFA_ENROLLMENT_REQUIRED",
+          },
+          { status: 403 }
+        );
+      }
+      const challengeToken = crypto.randomBytes(24).toString("hex");
+      const challengeId = "chal_" + crypto.randomBytes(8).toString("hex");
+      await query(
+        `INSERT INTO auth_challenges (id, user_id, purpose, challenge_token_hash, ip_approx, expires_at)
+         VALUES ($1, $2, 'mfa_login', $3, $4, $5)`,
+        [
+          challengeId,
+          userRecord.id,
+          hashToken(challengeToken),
+          clientIp,
+          new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        ]
+      );
+      return NextResponse.json({
+        success: true,
+        mfaRequired: true,
+        challengeToken,
+        mustChangePassword,
+      });
+    }
 
     // Update last_login_at and establish baseline password_expires_at if missing (without inventing password_changed_at)
     if (fromDatabase) {

@@ -108,6 +108,53 @@ export default function UserManagementModal({
     }
   }
 
+  function generateStrongPassword() {
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lower = "abcdefghijkmnopqrstuvwxyz";
+    const digits = "23456789";
+    const symbols = "!@#$%^&*-_";
+    const all = upper + lower + digits + symbols;
+    const arr = new Uint32Array(16);
+    if (typeof window !== "undefined" && window.crypto) {
+      window.crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 100000);
+    }
+    const chars = [
+      upper[arr[0] % upper.length],
+      lower[arr[1] % lower.length],
+      digits[arr[2] % digits.length],
+      symbols[arr[3] % symbols.length],
+    ];
+    for (let i = 4; i < 16; i++) chars.push(all[arr[i] % all.length]);
+    setPassword(chars.join(""));
+  }
+
+  async function handleResetMfa(u: User) {
+    setActionError("");
+    setActionSuccess("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/mfa", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: "reset_mfa", userId: u.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error || "Failed to reset MFA.");
+      } else {
+        setActionSuccess(`MFA reset and sessions revoked for ${u.name}.`);
+        onRefreshUsers();
+      }
+    } catch {
+      setActionError("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleUserAction(id: string, payload: Record<string, any>, successMessage: string) {
     setActionError("");
     setActionSuccess("");
@@ -269,18 +316,27 @@ export default function UserManagementModal({
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
-                    Temporary Password (Min 12 chars)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-zinc-400">
+                      Temporary Password (Min 12 chars)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={generateStrongPassword}
+                      className="text-[10px] font-semibold text-amber-400 hover:text-amber-300 cursor-pointer"
+                    >
+                      Generate Strong
+                    </button>
+                  </div>
                   <input
-                    type="password"
+                    type="text"
                     required
                     minLength={12}
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Min 12 characters"
-                    className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white font-mono"
                   />
                 </div>
                 <div>
@@ -476,6 +532,24 @@ export default function UserManagementModal({
                           >
                             {isInactive ? "Inactive" : "Active"}
                           </span>
+                          {u.approval_status && (
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                                u.approval_status === "Approved"
+                                  ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                                  : u.approval_status === "Pending Approval"
+                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                  : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                              }`}
+                            >
+                              {u.approval_status}
+                            </span>
+                          )}
+                          {u.mfa_enabled && (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                              MFA On
+                            </span>
+                          )}
                           {isLocked && (
                             <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">
                               Locked
@@ -571,6 +645,63 @@ export default function UserManagementModal({
                         <LogOut className="w-3 h-3" />
                         <span>Revoke</span>
                       </button>
+                      {!isSelf && u.approval_status !== "Approved" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUserAction(
+                                u.id,
+                                { approvalAction: "approve" },
+                                `${u.name} approved and activated.`
+                              )
+                            }
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Approve</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUserAction(
+                                u.id,
+                                { approvalAction: "reject" },
+                                `${u.name} rejected.`
+                              )
+                            }
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 cursor-pointer"
+                          >
+                            <span>Reject</span>
+                          </button>
+                        </>
+                      )}
+                      {!isSelf && u.approval_status === "Approved" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUserAction(
+                              u.id,
+                              { approvalAction: "revoke" },
+                              `Approval revoked for ${u.name}.`
+                            )
+                          }
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 cursor-pointer"
+                        >
+                          <span>Revoke Approval</span>
+                        </button>
+                      )}
+                      {u.mfa_enabled && (
+                        <button
+                          type="button"
+                          onClick={() => handleResetMfa(u)}
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-amber-300 cursor-pointer"
+                          title="Reset User MFA & Revoke Sessions"
+                        >
+                          <Shield className="w-3 h-3" />
+                          <span>Reset MFA</span>
+                        </button>
+                      )}
                       {!isSelf && (
                         <>
                           <button

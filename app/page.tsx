@@ -346,7 +346,7 @@ export default function Home() {
       place_of_supply: "27-Maharashtra",
       state: "27-Maharashtra",
       terms:
-        "• Delivery Within 4 weeks from date of payment confirmation.\n• Payment Terms: Advance\n• Validity: 15 days from date of quotation.",
+        "• Delivery Within 1 weeks from the date of payment confirmation.\n• Payment Terms:\n1. 50% Advance 2. 50% Before Dispatch\n• Payment Retention: NIL\n• Freight and Installation Included.\n• Material unloading, civil work and material handling equipment during installation are in client's scope.\n• Power supply up to panel is in client's scope.\n• Validity: 15 days from the date of quotation.\n• Any additional changes will be charged extra.",
       items: [
         {
           id: "it_1",
@@ -899,6 +899,7 @@ export default function Home() {
                 vendors={vendors}
                 composeSeed={mailSeed}
                 onClearSeed={() => setMailSeed(null)}
+                onOpenAdminSettings={() => setCurrentView("settings")}
               />
             </div>
           ) : currentView === "settings" ? (
@@ -998,6 +999,8 @@ export default function Home() {
             onAddVendor={handleAddVendor}
             onUpdateVendor={handleUpdateVendor}
             onDeleteVendor={handleDeleteVendor}
+            canApprove={hasPermission(currentUser, "vendors.approve")}
+            canViewBank={hasPermission(currentUser, "vendors.bank_view")}
             theme={theme}
           />
         </main>

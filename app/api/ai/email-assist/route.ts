@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { authenticateRequest, logAudit } from "@/lib/auth";
-import { sanitizeSensitiveBusinessData } from "@/lib/email-sanitizer";
+import {
+  protectSensitiveBusinessData,
+  restoreSensitiveBusinessData,
+} from "@/lib/email-sanitizer";
 import { getEffectiveAiConfig, EffectiveAiConfig } from "@/lib/settings-store";
 
 type AiMode =
@@ -294,32 +297,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Please enter draft text first." }, { status: 400 });
     }
 
-    // Privacy sanitization before sending to any external AI provider
-    const { sanitized, redactedCount } = sanitizeSensitiveBusinessData(rawText);
+    // Protect sensitive tokens with reversible request-scoped mapping before any external AI call
+    const { protectedText, tokenMap, protectedCount } = protectSensitiveBusinessData(rawText);
 
-    let improvedText: string | null = await callGeminiFreeTier(mode, sanitized, aiCfg, contextSubject);
+    let aiOutput: string | null = await callGeminiFreeTier(mode, protectedText, aiCfg, contextSubject);
     let providerUsed = "gemini_free";
 
-    if (!improvedText && aiCfg.allowExternalAi && mode === "grammar" && aiCfg.languageToolEnabled && aiCfg.provider !== "local") {
-      improvedText = await callLanguageToolGrammar(sanitized);
+    if (!aiOutput && aiCfg.allowExternalAi && mode === "grammar" && aiCfg.languageToolEnabled && aiCfg.provider !== "local") {
+      aiOutput = await callLanguageToolGrammar(protectedText);
       providerUsed = "languagetool";
     }
 
-    if (!improvedText) {
+    let improvedText: string;
+    if (aiOutput) {
+      const { restoredText, unresolvedCount } = restoreSensitiveBusinessData(aiOutput, tokenMap);
+      if (unresolvedCount > 0) {
+        return NextResponse.json(
+          {
+            error: "AI suggestion altered protected business values and was rejected to preserve accuracy. Original email kept unchanged.",
+            rejected: true,
+          },
+          { status: 422 }
+        );
+      }
+      improvedText = restoredText;
+    } else {
       if (!aiCfg.localFallbackEnabled) {
         return NextResponse.json(
           { error: "No external AI provider responded and local fallback is disabled." },
           { status: 503 }
         );
       }
-      improvedText = localRuleBasedTransform(mode, sanitized, contextSubject);
+      // Local B2B engine runs 100% on-server with zero external egress — preserve original values directly
+      improvedText = localRuleBasedTransform(mode, rawText, contextSubject);
       providerUsed = "local_b2b_engine";
     }
 
     await logAudit(
       "AI_EMAIL_ASSIST",
       auth.user.email,
-      `mode=${mode}, provider=${providerUsed}, redacted=${redactedCount}`,
+      `mode=${mode}, provider=${providerUsed}, protected=${protectedCount}`,
       { actorName: auth.user.name, module: "ai", recordRef: mode, outcome: "success" }
     );
 
@@ -327,7 +344,7 @@ export async function POST(req: NextRequest) {
       improvedText,
       providerUsed,
       mode,
-      redactedCount,
+      redactedCount: protectedCount,
       remainingToday: quota.remainingToday,
     });
   } catch (err: any) {

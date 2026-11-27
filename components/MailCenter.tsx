@@ -6,6 +6,15 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
+import { TextStyle } from "@tiptap/extension-text-style";
+import Color from "@tiptap/extension-color";
+import FontFamily from "@tiptap/extension-font-family";
+import Highlight from "@tiptap/extension-highlight";
+import Image from "@tiptap/extension-image";
+import { Table } from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableCell from "@tiptap/extension-table-cell";
+import TableHeader from "@tiptap/extension-table-header";
 import {
   Mail,
   Send,
@@ -21,6 +30,7 @@ import {
   Bold,
   Italic,
   Underline as UnderlineIcon,
+  Strikethrough,
   List,
   ListOrdered,
   Undo2,
@@ -28,12 +38,26 @@ import {
   Plus,
   X,
   Check,
-  ShieldCheck,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Link2,
+  Table2,
+  Eraser,
+  Maximize2,
+  Minimize2,
+  Eye,
+  Download,
+  PenTool,
+  Upload,
+  Star,
 } from "lucide-react";
 import {
   CompanyInfo,
   EmailDraft,
   EmailHistoryEntry,
+  EmailSignature,
   EmailTemplate,
   Quotation,
   User,
@@ -47,7 +71,7 @@ import {
   buildQuotationPdfName,
   buildTIPdfName,
 } from "../lib/vba-engine";
-import { stripHtmlToText } from "../lib/email-sanitizer";
+import { parseEmailList, stripHtmlToText } from "../lib/email-sanitizer";
 
 export interface MailComposeSeed {
   to?: string;
@@ -68,6 +92,7 @@ interface MailCenterProps {
   vendors: Vendor[];
   composeSeed?: MailComposeSeed | null;
   onClearSeed?: () => void;
+  onOpenAdminSettings?: () => void;
 }
 
 interface PendingAttachment {
@@ -100,15 +125,24 @@ export default function MailCenter({
   vendors,
   composeSeed,
   onClearSeed,
+  onOpenAdminSettings,
 }: MailCenterProps) {
   const isDark = theme === "dark";
   const canSend = hasPermission(currentUser, "mail.send");
   const canManageTemplates = hasPermission(currentUser, "mail.templates");
+  const canManageSignatures = hasPermission(currentUser, "mail.signatures") || canSend;
   const canUseAi = hasPermission(currentUser, "mail.compose");
   const canEditSettings = hasPermission(currentUser, "mail.settings");
 
-  const [activeTab, setActiveTab] = useState<"compose" | "drafts" | "history" | "templates">("compose");
+  const [activeTab, setActiveTab] = useState<
+    "compose" | "drafts" | "history" | "templates" | "signatures"
+  >("compose");
   const [loading, setLoading] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [showCc, setShowCc] = useState(true);
+  const [showBcc, setShowBcc] = useState(false);
+
   const [zohoStatus, setZohoStatus] = useState<{
     configured: boolean;
     host: string;
@@ -116,25 +150,31 @@ export default function MailCenter({
     senderEmail: string | null;
     fromName: string;
     defaultCc: string | null;
-    oauthConfigured: boolean;
   } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [history, setHistory] = useState<EmailHistoryEntry[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [signatures, setSignatures] = useState<EmailSignature[]>([]);
+  const [selectedSigId, setSelectedSigId] = useState<string>("");
+  const [includeSignature, setIncludeSignature] = useState(true);
 
   // Composer state
   const [draftId, setDraftId] = useState<string | null>(null);
   const [selectedQuoteNo, setSelectedQuoteNo] = useState<string>(currentQuote?.quotation_no || "");
   const [documentType, setDocumentType] = useState<string>("Quotation");
-  const [toEmails, setToEmails] = useState("");
+  const [toChips, setToChips] = useState<string[]>([]);
+  const [toInput, setToInput] = useState("");
   const [ccEmails, setCcEmails] = useState("");
   const [bccEmails, setBccEmails] = useState("");
   const [subject, setSubject] = useState("");
+  const [bodyDirty, setBodyDirty] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachingStatus, setAttachingStatus] = useState("");
   const [sending, setSending] = useState(false);
   const [statusBanner, setStatusBanner] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [recipientSearch, setRecipientSearch] = useState("");
+  const [showRecipientPicker, setShowRecipientPicker] = useState(false);
 
   // AI Assistant state
   const [aiLoading, setAiLoading] = useState(false);
@@ -144,35 +184,52 @@ export default function MailCenter({
     improvedText: string;
     providerUsed: string;
     mode: string;
-    redactedCount: number;
   } | null>(null);
   const [lastPreAiHtml, setLastPreAiHtml] = useState<string | null>(null);
 
-  // Template editor state
+  // Template & Signature editor state
   const [editingTpl, setEditingTpl] = useState<Partial<EmailTemplate> | null>(null);
+  const [editingSig, setEditingSig] = useState<Partial<EmailSignature> | null>(null);
+  const [fontFamily, setFontFamily] = useState("Verdana");
+  const [fontSize, setFontSize] = useState("10pt");
 
-  const signatureHtml = useMemo(() => {
-    return `<p><br/></p><p><strong>Regards,</strong><br/><strong>${company.name || "AVEN Industrial Automation"}</strong><br/>${
-      company.address ? `${company.address}<br/>` : ""
-    }${company.phone ? `Phone: ${company.phone}` : ""}${
-      company.email ? ` | Email: ${company.email}` : ""
-    }${company.website ? `<br/>Web: ${company.website}` : ""}</p>`;
-  }, [company]);
+  const activeSignature = useMemo(() => {
+    return (
+      signatures.find((s) => s.id === selectedSigId) ||
+      signatures.find((s) => s.is_default) ||
+      signatures[0] ||
+      null
+    );
+  }, [signatures, selectedSigId]);
+
+  const activeSignatureHtml = useMemo(() => {
+    if (!includeSignature || !activeSignature) return "";
+    return activeSignature.html_content || "";
+  }, [includeSignature, activeSignature]);
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       Underline,
+      TextStyle,
+      Color,
+      FontFamily,
+      Highlight.configure({ multicolor: true }),
       Link.configure({ openOnClick: false }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Image,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
-    content: `<p>Dear Sir/Madam,</p><p>Please find attached the requested document for your review.</p>${signatureHtml}`,
+    content: `<p style="font-family: Verdana, sans-serif; font-size: 10pt;">Dear Sir/Madam,</p><p style="font-family: Verdana, sans-serif; font-size: 10pt;">Please find attached the requested document for your review and kind consideration.</p>`,
     immediatelyRender: false,
+    onUpdate: () => setBodyDirty(true),
     editorProps: {
       attributes: {
-        class: `min-h-[200px] max-h-[380px] overflow-y-auto p-3 text-sm focus:outline-none ${
-          isDark ? "text-zinc-100" : "text-zinc-900"
-        }`,
+        style: `font-family: ${fontFamily}, Geneva, sans-serif; font-size: ${fontSize}; line-height: 1.5;`,
+        class: "min-h-[240px] max-h-[440px] overflow-y-auto p-4 focus:outline-none bg-white text-zinc-900",
       },
     },
   });
@@ -182,47 +239,67 @@ export default function MailCenter({
     [quotations, selectedQuoteNo, currentQuote]
   );
 
-  // Unique recipient directory from quotations & vendors
-  const recipientSuggestions = useMemo(() => {
-    const map = new Map<string, { label: string; email: string; type: "Client" | "Vendor" }>();
+  const recipientDirectory = useMemo(() => {
+    const list: Array<{ label: string; email: string; type: "Client" | "Vendor" }> = [];
+    const seen = new Set<string>();
     for (const q of quotations) {
-      if (q.client_email && q.client_email.includes("@")) {
-        map.set(q.client_email.toLowerCase(), {
-          label: `${q.client_name} (${q.client_email})`,
-          email: q.client_email,
-          type: "Client",
-        });
+      const em = (q.client_email || "").trim();
+      if (em && em.includes("@") && !seen.has(em.toLowerCase())) {
+        seen.add(em.toLowerCase());
+        list.push({ label: q.client_name || em, email: em, type: "Client" });
       }
     }
     for (const v of vendors) {
-      if (v.email && v.email.includes("@")) {
-        map.set(v.email.toLowerCase(), {
-          label: `${v.name} (${v.email})`,
-          email: v.email,
+      const em = (v.email || "").trim();
+      if (em && em.includes("@") && !seen.has(em.toLowerCase())) {
+        seen.add(em.toLowerCase());
+        list.push({
+          label: `${v.vendor_code ? v.vendor_code + " — " : ""}${v.name}`,
+          email: em,
           type: "Vendor",
         });
       }
     }
-    return Array.from(map.values());
+    return list;
   }, [quotations, vendors]);
+
+  const filteredDirectory = useMemo(() => {
+    const q = recipientSearch.trim().toLowerCase();
+    if (!q) return recipientDirectory;
+    return recipientDirectory.filter(
+      (r) => r.label.toLowerCase().includes(q) || r.email.toLowerCase().includes(q)
+    );
+  }, [recipientDirectory, recipientSearch]);
 
   async function fetchMailData() {
     setLoading(true);
     try {
-      const res = await fetch("/api/mail", { headers: getAuthHeaders() });
-      const data = await res.json();
-      if (res.ok) {
+      const [mailRes, sigRes] = await Promise.all([
+        fetch("/api/mail", { headers: getAuthHeaders() }),
+        fetch("/api/mail/signatures", { headers: getAuthHeaders() }),
+      ]);
+      const data = await mailRes.json();
+      if (mailRes.ok) {
         setZohoStatus(data.zoho);
         setAiEnabled(Boolean(data.aiEnabled));
         setHistory(Array.isArray(data.history) ? data.history : []);
         setDrafts(Array.isArray(data.drafts) ? data.drafts : []);
         setTemplates(Array.isArray(data.templates) ? data.templates : []);
-        if (!ccEmails && data.zoho?.defaultCc) {
-          setCcEmails(data.zoho.defaultCc);
+        if (!ccEmails && data.zoho?.defaultCc) setCcEmails(data.zoho.defaultCc);
+      }
+      if (sigRes.ok) {
+        const sigData = await sigRes.json();
+        if (Array.isArray(sigData)) {
+          setSignatures(sigData);
+          if (!selectedSigId && sigData.length > 0) {
+            const def = sigData.find((s) => s.is_default) || sigData[0];
+            setSelectedSigId(def.id);
+            setIncludeSignature(def.auto_insert !== false);
+          }
         }
       }
     } catch (e) {
-      console.warn("Could not load mail center data", e);
+      console.warn("Could not load Mail Center data", e);
     } finally {
       setLoading(false);
     }
@@ -232,27 +309,65 @@ export default function MailCenter({
     fetchMailData();
   }, []);
 
-  // Apply incoming compose seed from QuotationSystem or Overview
+  function addRecipients(raw: string) {
+    const parsed = parseEmailList(raw);
+    if (parsed.length === 0) return;
+    setToChips((prev) => {
+      const set = new Set(prev.map((e) => e.toLowerCase()));
+      const next = [...prev];
+      for (const em of parsed) {
+        if (!set.has(em.toLowerCase())) {
+          set.add(em.toLowerCase());
+          next.push(em);
+        }
+      }
+      return next;
+    });
+    setToInput("");
+  }
+
   useEffect(() => {
     if (!composeSeed || !editor) return;
     setActiveTab("compose");
-    if (composeSeed.quotation) {
-      setSelectedQuoteNo(composeSeed.quotation.quotation_no);
-    }
-    if (composeSeed.documentType) {
-      setDocumentType(composeSeed.documentType);
-    }
-    if (composeSeed.to !== undefined) setToEmails(composeSeed.to);
+    if (composeSeed.quotation) setSelectedQuoteNo(composeSeed.quotation.quotation_no);
+    if (composeSeed.documentType) setDocumentType(composeSeed.documentType);
+    if (composeSeed.to) setToChips(parseEmailList(composeSeed.to));
     if (composeSeed.cc !== undefined) setCcEmails(composeSeed.cc);
     if (composeSeed.subject !== undefined) setSubject(composeSeed.subject);
     if (composeSeed.bodyHtml !== undefined) {
-      editor.commands.setContent(`${composeSeed.bodyHtml}${signatureHtml}`);
+      editor.commands.setContent(composeSeed.bodyHtml);
+      setBodyDirty(false);
     }
     if (composeSeed.autoAttachDoc) {
       void attachErpDocument(composeSeed.autoAttachDoc, composeSeed.quotation || currentQuote);
     }
     if (onClearSeed) onClearSeed();
   }, [composeSeed, editor]);
+
+  function handleLinkedDocumentChange(quoteNo: string, docType: string) {
+    setSelectedQuoteNo(quoteNo);
+    setDocumentType(docType);
+    if (docType === "General") return;
+
+    const q = quotations.find((x) => x.quotation_no === quoteNo) || currentQuote;
+    if (docType === "Purchase Order") {
+      const vEmail = vendors.find((v) => v.operational_status !== "Blocked")?.email || "";
+      if (vEmail) setToChips(parseEmailList(vEmail));
+      setSubject(`Purchase Order PO-2026-011 - ${company.name || "AVEN Industrial Automation"}`);
+    } else if (q) {
+      if (q.client_email && q.client_email.includes("@")) {
+        setToChips(parseEmailList(q.client_email));
+      } else {
+        setToChips([]);
+      }
+      const subjMap: Record<string, string> = {
+        Quotation: `Quotation ${q.quotation_no} for ${q.product_type || "Industrial Automation"} - ${company.name}`,
+        "Proforma Invoice": `Proforma Invoice ${q.pi_number || q.quotation_no} - ${company.name}`,
+        "Tax Invoice": `Tax Invoice ${q.tax_invoice_number || q.quotation_no} - ${company.name}`,
+      };
+      if (subjMap[docType]) setSubject(subjMap[docType]);
+    }
+  }
 
   function fillPlaceholders(raw: string, q: Quotation | undefined): string {
     if (!q) return raw;
@@ -275,9 +390,10 @@ export default function MailCenter({
 
   function applyTemplate(tpl: EmailTemplate) {
     if (!editor) return;
+    if (bodyDirty && !window.confirm("Replace current email body with the selected template?")) return;
     setSubject(fillPlaceholders(tpl.subject_template || tpl.subject || "", activeQuoteObj));
-    const filledBody = fillPlaceholders(tpl.body_html, activeQuoteObj);
-    editor.commands.setContent(`${filledBody}${signatureHtml}`);
+    editor.commands.setContent(fillPlaceholders(tpl.body_html, activeQuoteObj));
+    setBodyDirty(false);
     setActiveTab("compose");
   }
 
@@ -339,7 +455,7 @@ export default function MailCenter({
         const result = String(reader.result || "");
         const base64 = result.includes(",") ? result.split(",")[1] : result;
         setAttachments((prev) => [
-          ...prev,
+          ...prev.filter((a) => a.filename !== file.name),
           {
             filename: file.name,
             contentType: file.type || "application/pdf",
@@ -353,9 +469,57 @@ export default function MailCenter({
     e.target.value = "";
   }
 
+  function downloadAttachment(att: PendingAttachment) {
+    const link = document.createElement("a");
+    link.href = `data:${att.contentType};base64,${att.base64}`;
+    link.download = att.filename;
+    link.click();
+  }
+
+  function previewAttachment(att: PendingAttachment) {
+    const byteChars = atob(att.base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([bytes], { type: att.contentType });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");
+  }
+
+  function buildFinalEmailHtml(): string {
+    const body = editor?.getHTML() || "";
+    const wrappedBody = `<div style="font-family: ${fontFamily}, Geneva, sans-serif; font-size: ${fontSize}; line-height: 1.5; color: #1f2937;">${body}</div>`;
+    return activeSignatureHtml ? `${wrappedBody}<br/>${activeSignatureHtml}` : wrappedBody;
+  }
+
   async function handleSendEmail() {
     if (!canSend || !editor) return;
     setStatusBanner(null);
+
+    const allRecipients = [...toChips, ...parseEmailList(toInput)];
+    if (allRecipients.length === 0) {
+      setStatusBanner({ type: "error", text: "Please enter at least one valid recipient email address in To." });
+      return;
+    }
+    if (!subject.trim()) {
+      setStatusBanner({ type: "error", text: "Email subject is required." });
+      return;
+    }
+
+    const totalBytes = attachments.reduce((s, a) => s + a.sizeBytes, 0);
+    if (totalBytes > 12 * 1024 * 1024) {
+      setStatusBanner({ type: "error", text: "Total attachment size exceeds 12 MB limit." });
+      return;
+    }
+
+    const finalHtml = buildFinalEmailHtml();
+    if (/\[REDACTED_[A-Z_]+\]|AVEN_PROT_\d+/i.test(finalHtml + " " + subject)) {
+      setStatusBanner({
+        type: "error",
+        text: "Send blocked: Unresolved redaction placeholders detected. Please restore actual values first.",
+      });
+      return;
+    }
+
     setSending(true);
     try {
       const res = await fetch("/api/mail", {
@@ -363,13 +527,13 @@ export default function MailCenter({
         headers: getAuthHeaders(),
         body: JSON.stringify({
           draft_id: draftId,
-          quotation_no: selectedQuoteNo || null,
+          quotation_no: documentType === "General" ? null : selectedQuoteNo || null,
           document_type: documentType,
-          to: toEmails,
+          to: allRecipients,
           cc: ccEmails,
           bcc: bccEmails,
           subject,
-          body_html: editor.getHTML(),
+          body_html: finalHtml,
           attachments: attachments.map((a) => ({
             filename: a.filename,
             contentType: a.contentType,
@@ -379,12 +543,13 @@ export default function MailCenter({
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatusBanner({ type: "error", text: data.error || "Failed to send email." });
+        setStatusBanner({ type: "error", text: data.error || "SMTP delivery failed." });
         return;
       }
       setStatusBanner({ type: "success", text: "Email sent successfully via Zoho Mail!" });
       setDraftId(null);
       setAttachments([]);
+      setBodyDirty(false);
       await fetchMailData();
     } catch {
       setStatusBanner({ type: "error", text: "Network error while sending email." });
@@ -396,6 +561,7 @@ export default function MailCenter({
   async function handleSaveDraft() {
     if (!canSend || !editor) return;
     setStatusBanner(null);
+    const allTo = [...toChips, ...parseEmailList(toInput)].join(", ");
     try {
       const res = await fetch("/api/mail/drafts", {
         method: "POST",
@@ -404,7 +570,7 @@ export default function MailCenter({
           id: draftId || undefined,
           quotation_no: selectedQuoteNo || null,
           document_type: documentType,
-          to_emails: toEmails,
+          to_emails: allTo,
           cc_emails: ccEmails,
           bcc_emails: bccEmails,
           subject,
@@ -427,6 +593,17 @@ export default function MailCenter({
     } catch {
       setStatusBanner({ type: "error", text: "Failed to save draft." });
     }
+  }
+
+  function handleDiscardDraft() {
+    if (!window.confirm("Discard current draft and reset composer?")) return;
+    setDraftId(null);
+    setToChips([]);
+    setToInput("");
+    setSubject("");
+    setAttachments([]);
+    setBodyDirty(false);
+    editor?.commands.setContent(`<p>Dear Sir/Madam,</p><p></p>`);
   }
 
   async function handleAiAssist(
@@ -454,7 +631,6 @@ export default function MailCenter({
         improvedText: data.improvedText,
         providerUsed: data.providerUsed,
         mode,
-        redactedCount: data.redactedCount || 0,
       });
     } catch {
       setStatusBanner({ type: "error", text: "AI Assistant request failed." });
@@ -480,42 +656,64 @@ export default function MailCenter({
     setLastPreAiHtml(null);
   }
 
-  async function toggleAiEnabled() {
-    if (!canEditSettings) return;
-    const next = !aiEnabled;
-    try {
-      const res = await fetch("/api/ai/email-assist", {
-        method: "PUT",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ enabled: next }),
-      });
-      if (res.ok) setAiEnabled(next);
-    } catch {}
-  }
-
   async function saveTemplate() {
     if (!editingTpl || !canManageTemplates) return;
-    try {
-      const res = await fetch("/api/mail/templates", {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(editingTpl),
-      });
-      if (res.ok) {
-        setEditingTpl(null);
-        await fetchMailData();
-      }
-    } catch {}
+    const res = await fetch("/api/mail/templates", {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(editingTpl),
+    });
+    if (res.ok) {
+      setEditingTpl(null);
+      await fetchMailData();
+    }
   }
 
   async function deleteTemplate(id: string) {
-    try {
-      const res = await fetch(`/api/mail/templates?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
+    const res = await fetch(`/api/mail/templates?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (res.ok) await fetchMailData();
+  }
+
+  async function saveSignature() {
+    if (!editingSig || !canManageSignatures) return;
+    const res = await fetch("/api/mail/signatures", {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(editingSig),
+    });
+    if (res.ok) {
+      setEditingSig(null);
+      await fetchMailData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setStatusBanner({ type: "error", text: err.error || "Failed to save signature." });
+    }
+  }
+
+  async function handleSignatureLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !editingSig) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const res = await fetch("/api/upload", {
+        method: "POST",
         headers: getAuthHeaders(),
+        body: JSON.stringify({ fileName: file.name, dataUrl: reader.result }),
       });
-      if (res.ok) await fetchMailData();
-    } catch {}
+      const data = await res.json();
+      if (res.ok && data.url) {
+        const currentHtml = editingSig.html_content || "";
+        const updatedHtml = currentHtml.includes("<img")
+          ? currentHtml.replace(/src="[^"]*"/, `src="${data.url}"`)
+          : `${currentHtml}<br/><img src="${data.url}" alt="Company Logo" style="height:46px;width:auto;" />`;
+        setEditingSig({ ...editingSig, logo_url: data.url, html_content: updatedHtml });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   }
 
   const cardCls = isDark
@@ -526,19 +724,23 @@ export default function MailCenter({
     : "bg-slate-50 border-slate-300 text-zinc-900 placeholder-zinc-400";
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 max-w-[1400px] mx-auto w-full min-w-0">
-      {/* Top Status Bar */}
+    <div
+      className={`${
+        fullscreen ? "fixed inset-0 z-50 overflow-y-auto bg-[#09090b] p-4" : "p-3 sm:p-6 max-w-[1440px] mx-auto w-full min-w-0"
+      } space-y-4`}
+    >
+      {/* Header Bar */}
       <div className={`${cardCls} rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
             <Mail className="w-5 h-5 text-emerald-500" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-base font-bold truncate">Zoho Mail Center</h2>
+            <h2 className="text-base font-bold truncate">AVEN Mail Center</h2>
             <p className={`text-xs truncate ${isDark ? "text-zinc-400" : "text-slate-500"}`}>
               {zohoStatus?.configured
-                ? `Connected: ${zohoStatus.senderEmail} (${zohoStatus.host}:${zohoStatus.port})`
-                : "SMTP pending configuration (set ZOHO_EMAIL & ZOHO_APP_PASSWORD in environment)"}
+                ? `Sender: ${zohoStatus.fromName} <${zohoStatus.senderEmail}> (${zohoStatus.host}:${zohoStatus.port})`
+                : "SMTP pending configuration"}
             </p>
           </div>
         </div>
@@ -552,18 +754,25 @@ export default function MailCenter({
           >
             {zohoStatus?.configured ? "Zoho SMTP Ready" : "SMTP Not Configured"}
           </span>
-          {canEditSettings && (
+          {canEditSettings && onOpenAdminSettings && (
             <button
-              onClick={toggleAiEnabled}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border cursor-pointer ${
-                aiEnabled
-                  ? "bg-indigo-500/15 text-indigo-400 border-indigo-500/30"
-                  : "bg-zinc-800 text-zinc-400 border-zinc-700"
+              onClick={onOpenAdminSettings}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
               }`}
             >
-              AI Assistant: {aiEnabled ? "ON" : "OFF"}
+              Email Configuration
             </button>
           )}
+          <button
+            onClick={() => setFullscreen((f) => !f)}
+            className={`p-1.5 rounded-lg border cursor-pointer ${
+              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+            }`}
+            title={fullscreen ? "Exit Fullscreen" : "Fullscreen Compose"}
+          >
+            {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
           <button
             onClick={fetchMailData}
             disabled={loading}
@@ -581,10 +790,11 @@ export default function MailCenter({
       <div className="flex flex-wrap gap-2">
         {(
           [
-            { id: "compose", label: "Compose Email" },
+            { id: "compose", label: "Compose" },
             { id: "drafts", label: `Drafts (${drafts.length})` },
             { id: "history", label: `Sent History (${history.length})` },
             { id: "templates", label: `Templates (${templates.length})` },
+            { id: "signatures", label: `Signatures (${signatures.length})` },
           ] as const
         ).map((tab) => (
           <button
@@ -620,369 +830,558 @@ export default function MailCenter({
         </div>
       )}
 
-      {/* COMPOSE TAB */}
+      {/* COMPOSE WORKSPACE */}
       {activeTab === "compose" && (
-        <div className={`${cardCls} rounded-xl p-4 sm:p-5 space-y-4`}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold mb-1 opacity-75">Linked Quotation</label>
-              <select
-                value={selectedQuoteNo}
-                onChange={(e) => setSelectedQuoteNo(e.target.value)}
-                className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
+        <div className={`${cardCls} rounded-xl overflow-hidden`}>
+          {/* Top Action Toolbar (Zoho-style) */}
+          <div
+            className={`px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-2 ${
+              isDark ? "bg-zinc-900/70 border-zinc-800" : "bg-slate-50 border-slate-200"
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {canSend && (
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={handleSendEmail}
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white cursor-pointer flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" /> {sending ? "Sending..." : "Send"}
+                </button>
+              )}
+              {canSend && (
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${
+                    isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-white"
+                  }`}
+                >
+                  <Save className="w-3.5 h-3.5" /> Save Draft
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10 cursor-pointer"
               >
-                {quotations.map((q) => (
-                  <option key={q.id || q.quotation_no} value={q.quotation_no}>
-                    {q.quotation_no} — {q.client_name}
-                  </option>
-                ))}
-              </select>
+                Discard
+              </button>
             </div>
-            <div>
-              <label className="block text-[11px] font-semibold mb-1 opacity-75">Document Type</label>
-              <select
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value)}
-                className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${
+                  isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-white"
+                }`}
               >
-                <option value="Quotation">Quotation</option>
-                <option value="Proforma Invoice">Proforma Invoice</option>
-                <option value="Tax Invoice">Tax Invoice</option>
-                <option value="Purchase Order">Purchase Order</option>
-                <option value="General">General</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold mb-1 opacity-75">Load Template</label>
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const tpl = templates.find((t) => t.id === e.target.value);
-                  if (tpl) applyTemplate(tpl);
-                }}
-                className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-              >
-                <option value="" disabled>
-                  Choose B2B template...
-                </option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    [{t.category}] {t.name}
-                  </option>
-                ))}
-              </select>
+                <Eye className="w-3.5 h-3.5" /> Preview Email
+              </button>
             </div>
           </div>
 
-          {/* Recipients */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-semibold opacity-75">To (comma separated)</label>
+          <div className="p-4 sm:p-5 space-y-4">
+            {/* Compact Linked Document & Template Selector */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold mb-1 opacity-75">Linked Quotation</label>
                 <select
-                  value=""
-                  onChange={(e) => {
-                    if (!e.target.value) return;
-                    setToEmails((prev) => (prev ? `${prev}, ${e.target.value}` : e.target.value));
-                  }}
-                  className={`text-[11px] px-2 py-0.5 rounded border ${inputCls}`}
+                  value={selectedQuoteNo}
+                  onChange={(e) => handleLinkedDocumentChange(e.target.value, documentType)}
+                  className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
                 >
-                  <option value="">+ Pick Client/Vendor</option>
-                  {recipientSuggestions.map((r) => (
-                    <option key={r.email} value={r.email}>
-                      [{r.type}] {r.label}
+                  {quotations.map((q) => (
+                    <option key={q.id || q.quotation_no} value={q.quotation_no}>
+                      {q.quotation_no} — {q.client_name}
                     </option>
                   ))}
                 </select>
               </div>
-              <input
-                type="text"
-                value={toEmails}
-                onChange={(e) => setToEmails(e.target.value)}
-                placeholder="client@company.com"
-                className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[11px] font-semibold mb-1 opacity-75">CC</label>
-                <input
-                  type="text"
-                  value={ccEmails}
-                  onChange={(e) => setCcEmails(e.target.value)}
-                  placeholder="info@avenautomation.in"
-                  className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-                />
+                <label className="block text-[11px] font-semibold mb-1 opacity-75">Document Type</label>
+                <select
+                  value={documentType}
+                  onChange={(e) => handleLinkedDocumentChange(selectedQuoteNo, e.target.value)}
+                  className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
+                >
+                  <option value="Quotation">Quotation</option>
+                  <option value="Proforma Invoice">Proforma Invoice</option>
+                  <option value="Tax Invoice">Tax Invoice</option>
+                  <option value="Purchase Order">Purchase Order</option>
+                  <option value="General">General Email</option>
+                </select>
               </div>
               <div>
-                <label className="block text-[11px] font-semibold mb-1 opacity-75">BCC</label>
-                <input
-                  type="text"
-                  value={bccEmails}
-                  onChange={(e) => setBccEmails(e.target.value)}
-                  placeholder="Optional BCC"
-                  className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold mb-1 opacity-75">Subject</label>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="Quotation 26-27/AIA/... - AVEN Industrial Automation"
-              className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-            />
-          </div>
-
-          {/* Tiptap Formatting + AI Assistant Toolbar */}
-          <div className={`rounded-lg border overflow-hidden ${isDark ? "border-zinc-700" : "border-slate-300"}`}>
-            <div
-              className={`p-2 border-b flex flex-wrap items-center gap-1.5 ${
-                isDark ? "bg-zinc-900 border-zinc-800" : "bg-slate-100 border-slate-200"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().toggleBold().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Bold"
-              >
-                <Bold className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().toggleItalic().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Italic"
-              >
-                <Italic className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().toggleUnderline().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Underline"
-              >
-                <UnderlineIcon className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().toggleBulletList().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Bullet List"
-              >
-                <List className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Numbered List"
-              >
-                <ListOrdered className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().undo().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Undo"
-              >
-                <Undo2 className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editor?.chain().focus().redo().run()}
-                className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                title="Redo"
-              >
-                <Redo2 className="w-3.5 h-3.5" />
-              </button>
-
-              {canUseAi && aiEnabled && (
-                <div className="flex flex-wrap items-center gap-1 ml-auto pl-2 border-l border-zinc-700/50">
-                  <span className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 mr-1">
-                    <Sparkles className="w-3 h-3" /> AI:
-                  </span>
-                  {(
-                    [
-                      ["grammar", "Grammar"],
-                      ["professional", "Professional"],
-                      ["formal", "Formal"],
-                      ["concise", "Concise"],
-                      ["polite", "Polite"],
-                      ["followup", "Follow-Up"],
-                      ["translate_en", "MR/HI → EN"],
-                    ] as const
-                  ).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      disabled={aiLoading}
-                      onClick={() => handleAiAssist(mode)}
-                      className={`px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
-                        isDark
-                          ? "bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/30"
-                          : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                      }`}
-                    >
-                      {label}
-                    </button>
+                <label className="block text-[11px] font-semibold mb-1 opacity-75">Insert Template</label>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const tpl = templates.find((t) => t.id === e.target.value);
+                    if (tpl) applyTemplate(tpl);
+                  }}
+                  className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
+                >
+                  <option value="" disabled>
+                    Choose B2B template...
+                  </option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      [{t.category}] {t.name}
+                    </option>
                   ))}
-                  {lastPreAiHtml && (
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold mb-1 opacity-75">Signature</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={includeSignature ? selectedSigId : "__none__"}
+                    onChange={(e) => {
+                      if (e.target.value === "__none__") setIncludeSignature(false);
+                      else {
+                        setIncludeSignature(true);
+                        setSelectedSigId(e.target.value);
+                      }
+                    }}
+                    className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
+                  >
+                    <option value="__none__">No Signature</option>
+                    {signatures.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Zoho-Style Full-Width Header Rows: From, To, CC, BCC, Subject */}
+            <div className={`rounded-lg border divide-y ${isDark ? "border-zinc-800 divide-zinc-800" : "border-slate-200 divide-slate-200"}`}>
+              {/* From */}
+              <div className="flex items-center px-3 py-2 gap-3 text-xs">
+                <span className="w-14 shrink-0 font-semibold opacity-65">From</span>
+                <span className="truncate font-medium">
+                  {zohoStatus?.fromName || "AVEN Industrial Automation"} &lt;{zohoStatus?.senderEmail || "sales@avenautomation.in"}&gt;
+                </span>
+              </div>
+
+              {/* To (Chips + Searchable Picker + CC/BCC toggles) */}
+              <div className="flex flex-wrap items-center px-3 py-2 gap-2 text-xs relative">
+                <span className="w-14 shrink-0 font-semibold opacity-65">To</span>
+                <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-[200px]">
+                  {toChips.map((em) => (
+                    <span
+                      key={em}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium"
+                    >
+                      {em}
+                      <button
+                        type="button"
+                        onClick={() => setToChips((prev) => prev.filter((x) => x !== em))}
+                        className="hover:text-white cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={toInput}
+                    onChange={(e) => setToInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (["Enter", ",", ";", "Tab"].includes(e.key) && toInput.trim()) {
+                        e.preventDefault();
+                        addRecipients(toInput);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (toInput.trim()) addRecipients(toInput);
+                    }}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text");
+                      if (text.includes(",") || text.includes(";")) {
+                        e.preventDefault();
+                        addRecipients(text);
+                      }
+                    }}
+                    placeholder="Type email & press Enter, or paste comma/semicolon list"
+                    className="flex-1 min-w-[180px] bg-transparent focus:outline-none text-xs py-1"
+                  />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecipientPicker((v) => !v)}
+                    className="px-2.5 py-1 rounded border border-zinc-700 text-[11px] font-semibold hover:bg-zinc-800 cursor-pointer"
+                  >
+                    + Pick Client/Vendor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCc((v) => !v)}
+                    className="text-[11px] opacity-70 hover:opacity-100 cursor-pointer"
+                  >
+                    Cc
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBcc((v) => !v)}
+                    className="text-[11px] opacity-70 hover:opacity-100 cursor-pointer"
+                  >
+                    Bcc
+                  </button>
+                </div>
+
+                {showRecipientPicker && (
+                  <div
+                    className={`absolute right-3 top-full mt-1 w-80 max-w-full z-30 rounded-xl border shadow-2xl p-2 space-y-2 ${
+                      isDark ? "bg-zinc-950 border-zinc-700" : "bg-white border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="text"
+                      value={recipientSearch}
+                      onChange={(e) => setRecipientSearch(e.target.value)}
+                      placeholder="Search client or vendor..."
+                      className={`w-full px-2.5 py-1.5 rounded border text-xs ${inputCls}`}
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-1">
+                      {filteredDirectory.map((r) => (
+                        <button
+                          key={r.email}
+                          type="button"
+                          onClick={() => {
+                            addRecipients(r.email);
+                            setShowRecipientPicker(false);
+                          }}
+                          className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between cursor-pointer ${
+                            isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100"
+                          }`}
+                        >
+                          <span className="truncate font-medium">{r.label}</span>
+                          <span className="text-[10px] opacity-60 ml-2 shrink-0">{r.type}</span>
+                        </button>
+                      ))}
+                      {filteredDirectory.length === 0 && (
+                        <div className="text-[11px] opacity-60 p-2 text-center">No matching email addresses</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* CC */}
+              {showCc && (
+                <div className="flex items-center px-3 py-2 gap-3 text-xs">
+                  <span className="w-14 shrink-0 font-semibold opacity-65">Cc</span>
+                  <input
+                    type="text"
+                    value={ccEmails}
+                    onChange={(e) => setCcEmails(e.target.value)}
+                    placeholder="info@avenautomation.in"
+                    className="flex-1 bg-transparent focus:outline-none text-xs"
+                  />
+                </div>
+              )}
+
+              {/* BCC */}
+              {showBcc && (
+                <div className="flex items-center px-3 py-2 gap-3 text-xs">
+                  <span className="w-14 shrink-0 font-semibold opacity-65">Bcc</span>
+                  <input
+                    type="text"
+                    value={bccEmails}
+                    onChange={(e) => setBccEmails(e.target.value)}
+                    placeholder="Optional BCC addresses"
+                    className="flex-1 bg-transparent focus:outline-none text-xs"
+                  />
+                </div>
+              )}
+
+              {/* Subject */}
+              <div className="flex items-center px-3 py-2 gap-3 text-xs">
+                <span className="w-14 shrink-0 font-semibold opacity-65">Subject</span>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Enter email subject..."
+                  className="flex-1 bg-transparent focus:outline-none text-xs font-medium"
+                />
+              </div>
+            </div>
+
+            {/* Rich-Text Toolbar + AI Toolbar */}
+            <div className={`rounded-lg border overflow-hidden ${isDark ? "border-zinc-700" : "border-slate-300"}`}>
+              <div
+                className={`p-2 border-b flex flex-wrap items-center gap-1 ${
+                  isDark ? "bg-zinc-900 border-zinc-800" : "bg-slate-100 border-slate-200"
+                }`}
+              >
+                <select
+                  value={fontFamily}
+                  onChange={(e) => {
+                    setFontFamily(e.target.value);
+                    editor?.chain().focus().setFontFamily(e.target.value).run();
+                  }}
+                  className={`h-7 px-2 rounded border text-[11px] ${inputCls}`}
+                  title="Font Family"
+                >
+                  <option value="Verdana">Verdana</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Tahoma">Tahoma</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                </select>
+                <select
+                  value={fontSize}
+                  onChange={(e) => setFontSize(e.target.value)}
+                  className={`h-7 px-2 rounded border text-[11px] ${inputCls}`}
+                  title="Default Font Size"
+                >
+                  <option value="9pt">9 pt</option>
+                  <option value="10pt">10 pt</option>
+                  <option value="11pt">11 pt</option>
+                  <option value="12pt">12 pt</option>
+                  <option value="14pt">14 pt</option>
+                </select>
+
+                <button type="button" onClick={() => editor?.chain().focus().toggleBold().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Bold"><Bold className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleItalic().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Italic"><Italic className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleUnderline().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Underline"><UnderlineIcon className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleStrike().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
+
+                <input
+                  type="color"
+                  onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+                  className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer"
+                  title="Text Color"
+                />
+                <input
+                  type="color"
+                  defaultValue="#fef08a"
+                  onChange={(e) => editor?.chain().focus().toggleHighlight({ color: e.target.value }).run()}
+                  className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer"
+                  title="Highlight Color"
+                />
+
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("left").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Left"><AlignLeft className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("center").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Center"><AlignCenter className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("right").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Right"><AlignRight className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Justify"><AlignJustify className="w-3.5 h-3.5" /></button>
+
+                <button type="button" onClick={() => editor?.chain().focus().toggleBulletList().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Bullet List"><List className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Numbered List"><ListOrdered className="w-3.5 h-3.5" /></button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = window.prompt("Enter link URL:");
+                    if (url) editor?.chain().focus().setLink({ href: url }).run();
+                  }}
+                  className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
+                  title="Insert Link"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+                  className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
+                  title="Insert Table"
+                >
+                  <Table2 className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Clear Formatting"><Eraser className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().undo().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Undo"><Undo2 className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().redo().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Redo"><Redo2 className="w-3.5 h-3.5" /></button>
+
+                {canUseAi && aiEnabled && (
+                  <div className="flex flex-wrap items-center gap-1 ml-auto pl-2 border-l border-zinc-700/50">
+                    <span className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 mr-1">
+                      <Sparkles className="w-3 h-3" /> AI:
+                    </span>
+                    {(
+                      [
+                        ["grammar", "Grammar"],
+                        ["professional", "Professional"],
+                        ["formal", "Formal"],
+                        ["concise", "Concise"],
+                        ["polite", "Polite"],
+                        ["followup", "Follow-Up"],
+                        ["translate_en", "MR/HI → EN"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        disabled={aiLoading}
+                        onClick={() => handleAiAssist(mode)}
+                        className={`px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                          isDark
+                            ? "bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/30"
+                            : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    {lastPreAiHtml && (
+                      <button
+                        type="button"
+                        onClick={undoLastAiChange}
+                        className="px-2 py-1 rounded text-[11px] bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer"
+                      >
+                        Undo AI
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* White B2B Email Compose Canvas (prevents dark-mode bleed into outgoing emails) */}
+              <EditorContent editor={editor} />
+
+              {/* Separated Non-AI-Touched Signature Preview Block */}
+              {includeSignature && activeSignatureHtml && (
+                <div className="bg-white border-t border-slate-200 px-4 py-3 text-zinc-900">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center justify-between">
+                    <span>Email Signature ({activeSignature?.name})</span>
                     <button
                       type="button"
-                      onClick={undoLastAiChange}
-                      className="px-2 py-1 rounded text-[11px] bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer"
+                      onClick={() => setActiveTab("signatures")}
+                      className="text-indigo-600 hover:underline cursor-pointer normal-case"
                     >
-                      Undo AI
+                      Manage Signatures
                     </button>
-                  )}
+                  </div>
+                  <div dangerouslySetInnerHTML={{ __html: activeSignatureHtml }} />
                 </div>
               )}
             </div>
-            <EditorContent editor={editor} />
-          </div>
 
-          {/* AI Diff Review Panel */}
-          {aiDiff && (
-            <div className="p-4 rounded-xl border border-indigo-500/40 bg-indigo-500/10 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
-                  <Sparkles className="w-4 h-4" />
-                  AI Suggestion Review ({aiDiff.mode} · {aiDiff.providerUsed})
-                  {aiDiff.redactedCount > 0 && (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" /> {aiDiff.redactedCount} sensitive tokens redacted
-                    </span>
-                  )}
+            {/* AI Diff Review Panel */}
+            {aiDiff && (
+              <div className="p-4 rounded-xl border border-indigo-500/40 bg-indigo-500/10 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                    <Sparkles className="w-4 h-4" />
+                    AI Suggestion Review ({aiDiff.mode} · {aiDiff.providerUsed})
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAiDiff(null)}
+                      className="px-3 py-1 rounded-lg text-xs border border-zinc-600 hover:bg-zinc-800 cursor-pointer flex items-center gap-1"
+                    >
+                      <X className="w-3.5 h-3.5" /> Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={acceptAiSuggestion}
+                      className="px-3 py-1 rounded-lg text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer flex items-center gap-1"
+                    >
+                      <Check className="w-3.5 h-3.5" /> Accept
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAiDiff(null)}
-                    className="px-3 py-1 rounded-lg text-xs border border-zinc-600 hover:bg-zinc-800 cursor-pointer flex items-center gap-1"
-                  >
-                    <X className="w-3.5 h-3.5" /> Reject
-                  </button>
-                  <button
-                    type="button"
-                    onClick={acceptAiSuggestion}
-                    className="px-3 py-1 rounded-lg text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer flex items-center gap-1"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Accept
-                  </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className={`p-3 rounded-lg border ${isDark ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-200"}`}>
+                    <div className="text-[10px] font-bold uppercase opacity-60 mb-1">Original</div>
+                    <div className="whitespace-pre-wrap">{aiDiff.originalText}</div>
+                  </div>
+                  <div className={`p-3 rounded-lg border ${isDark ? "bg-zinc-950 border-indigo-500/40" : "bg-white border-indigo-300"}`}>
+                    <div className="text-[10px] font-bold uppercase text-indigo-400 mb-1">AI Improved</div>
+                    <div className="whitespace-pre-wrap">{aiDiff.improvedText}</div>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className={`p-3 rounded-lg border ${isDark ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-200"}`}>
-                  <div className="text-[10px] font-bold uppercase opacity-60 mb-1">Original</div>
-                  <div className="whitespace-pre-wrap">{aiDiff.originalText}</div>
-                </div>
-                <div className={`p-3 rounded-lg border ${isDark ? "bg-zinc-950 border-indigo-500/40" : "bg-white border-indigo-300"}`}>
-                  <div className="text-[10px] font-bold uppercase text-indigo-400 mb-1">AI Improved</div>
-                  <div className="whitespace-pre-wrap">{aiDiff.improvedText}</div>
-                </div>
-              </div>
-            </div>
-          )}
+            )}
 
-          {/* Attachments */}
-          <div className={`p-3 rounded-lg border space-y-2 ${isDark ? "border-zinc-800 bg-zinc-900/50" : "border-slate-200 bg-slate-50"}`}>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold flex items-center gap-1.5 mr-1">
-                <Paperclip className="w-3.5 h-3.5 text-emerald-500" /> Attach ERP PDF:
-              </span>
-              {(
-                [
-                  ["quotation", "Quotation (2 Pages)"],
-                  ["pi", "Proforma Invoice"],
-                  ["ti", "Tax Invoice"],
-                  ["po", "Purchase Order"],
-                ] as const
-              ).map(([kind, label]) => (
-                <button
-                  key={kind}
-                  type="button"
-                  onClick={() => attachErpDocument(kind)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium border cursor-pointer ${
+            {/* Enhanced Attachments Toolbar */}
+            <div className={`p-3.5 rounded-xl border space-y-3 ${isDark ? "border-zinc-800 bg-zinc-900/50" : "border-slate-200 bg-slate-50"}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold flex items-center gap-1.5 mr-1">
+                  <Paperclip className="w-3.5 h-3.5 text-emerald-500" /> Attach ERP Document:
+                </span>
+                {(
+                  [
+                    ["quotation", "Quotation (2 Pages)"],
+                    ["pi", "Proforma Invoice"],
+                    ["ti", "Tax Invoice"],
+                    ["po", "Purchase Order"],
+                  ] as const
+                ).map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => attachErpDocument(kind)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border cursor-pointer ${
+                      isDark
+                        ? "border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200"
+                        : "border-slate-300 bg-white hover:bg-slate-100 text-zinc-800"
+                    }`}
+                  >
+                    + {label}
+                  </button>
+                ))}
+                <label
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border cursor-pointer flex items-center gap-1 ${
                     isDark
                       ? "border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200"
                       : "border-slate-300 bg-white hover:bg-slate-100 text-zinc-800"
                   }`}
                 >
-                  + {label}
-                </button>
-              ))}
-              <label
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium border cursor-pointer ${
-                  isDark
-                    ? "border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200"
-                    : "border-slate-300 bg-white hover:bg-slate-100 text-zinc-800"
-                }`}
-              >
-                + Upload File
-                <input
-                  type="file"
-                  accept=".pdf,image/png,image/jpeg"
-                  multiple
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
-              {attachingStatus && <span className="text-[11px] text-emerald-400">{attachingStatus}</span>}
-            </div>
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {attachments.map((att) => (
-                  <div
-                    key={att.filename}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs border ${
-                      isDark ? "bg-zinc-950 border-zinc-700" : "bg-white border-slate-300"
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="truncate max-w-[200px]">{att.filename}</span>
-                    <span className="text-[10px] opacity-60">{Math.round(att.sizeBytes / 1024)} KB</span>
-                    <button
-                      type="button"
-                      onClick={() => setAttachments((prev) => prev.filter((a) => a.filename !== att.filename))}
-                      className="text-rose-400 hover:text-rose-300 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+                  <Upload className="w-3 h-3" /> Upload File
+                  <input
+                    type="file"
+                    accept=".pdf,image/png,image/jpeg"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+                {attachingStatus && <span className="text-[11px] text-emerald-400 font-medium">{attachingStatus}</span>}
               </div>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-            {canSend && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${
-                    isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-                  }`}
-                >
-                  <Save className="w-3.5 h-3.5" /> Save Draft
-                </button>
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={handleSendEmail}
-                  className="px-5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white cursor-pointer flex items-center gap-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" /> {sending ? "Sending via Zoho..." : "Send Email"}
-                </button>
-              </>
-            )}
+              {attachments.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.filename}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs border ${
+                        isDark ? "bg-zinc-950 border-zinc-700" : "bg-white border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="truncate font-medium" title={att.filename}>{att.filename}</div>
+                          <div className="text-[10px] opacity-60">{(att.sizeBytes / 1024).toFixed(1)} KB</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button type="button" onClick={() => previewAttachment(att)} className="p-1 hover:text-sky-400 cursor-pointer" title="Preview">
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => downloadAttachment(att)} className="p-1 hover:text-emerald-400 cursor-pointer" title="Download">
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAttachments((prev) => prev.filter((a) => a.filename !== att.filename))}
+                          className="p-1 text-rose-400 hover:text-rose-300 cursor-pointer"
+                          title="Remove"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1010,7 +1409,7 @@ export default function MailCenter({
                   <button
                     onClick={() => {
                       setDraftId(d.id);
-                      setToEmails(d.to_emails || "");
+                      setToChips(parseEmailList(d.to_emails || ""));
                       setCcEmails(d.cc_emails || "");
                       setBccEmails(d.bcc_emails || "");
                       setSubject(d.subject || "");
@@ -1065,9 +1464,7 @@ export default function MailCenter({
                     <td className="py-2.5 pr-3">
                       <span
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          h.status === "sent"
-                            ? "bg-emerald-500/15 text-emerald-400"
-                            : "bg-rose-500/15 text-rose-400"
+                          h.status === "sent" ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"
                         }`}
                       >
                         {h.status}
@@ -1112,7 +1509,6 @@ export default function MailCenter({
               </button>
             )}
           </div>
-
           {editingTpl && (
             <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "border-zinc-700 bg-zinc-900" : "border-slate-300 bg-slate-50"}`}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1125,7 +1521,7 @@ export default function MailCenter({
                 />
                 <input
                   type="text"
-                  placeholder="Category (e.g. Quotation, Follow-up)"
+                  placeholder="Category"
                   value={editingTpl.category || ""}
                   onChange={(e) => setEditingTpl({ ...editingTpl, category: e.target.value })}
                   className={`px-3 py-2 rounded-lg border text-xs ${inputCls}`}
@@ -1133,7 +1529,7 @@ export default function MailCenter({
               </div>
               <input
                 type="text"
-                placeholder="Subject Template (supports {{quotation_no}}, {{client_name}}, {{company_name}})"
+                placeholder="Subject Template"
                 value={editingTpl.subject_template || ""}
                 onChange={(e) => setEditingTpl({ ...editingTpl, subject_template: e.target.value })}
                 className={`w-full px-3 py-2 rounded-lg border text-xs ${inputCls}`}
@@ -1146,22 +1542,15 @@ export default function MailCenter({
                 className={`w-full px-3 py-2 rounded-lg border text-xs font-mono ${inputCls}`}
               />
               <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setEditingTpl(null)}
-                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-600 cursor-pointer"
-                >
+                <button onClick={() => setEditingTpl(null)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-600 cursor-pointer">
                   Cancel
                 </button>
-                <button
-                  onClick={saveTemplate}
-                  className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer"
-                >
+                <button onClick={saveTemplate} className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer">
                   Save Template
                 </button>
               </div>
             </div>
           )}
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {templates.map((t) => (
               <div
@@ -1173,38 +1562,182 @@ export default function MailCenter({
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold">{t.name}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
-                      {t.category}
-                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">{t.category}</span>
                   </div>
-                  <div className="text-[11px] opacity-70 mt-1 truncate">{t.subject_template}</div>
+                  <div className="text-[11px] opacity-70 mt-1 truncate">{t.subject_template || t.subject}</div>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-1">
-                  <button
-                    onClick={() => applyTemplate(t)}
-                    className="px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-600 text-white cursor-pointer"
-                  >
+                  <button onClick={() => applyTemplate(t)} className="px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-600 text-white cursor-pointer">
                     Use Template
                   </button>
                   {canManageTemplates && (
-                    <button
-                      onClick={() => setEditingTpl(t)}
-                      className="px-2.5 py-1 rounded text-[11px] border border-zinc-600 cursor-pointer"
-                    >
+                    <button onClick={() => setEditingTpl(t)} className="px-2.5 py-1 rounded text-[11px] border border-zinc-600 cursor-pointer">
                       Edit
                     </button>
                   )}
                   {canManageTemplates && !t.is_default && (
-                    <button
-                      onClick={() => deleteTemplate(t.id)}
-                      className="p-1 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"
-                    >
+                    <button onClick={() => deleteTemplate(t.id)} className="p-1 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* SIGNATURES TAB */}
+      {activeTab === "signatures" && (
+        <div className={`${cardCls} rounded-xl p-4 space-y-4`}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-75 flex items-center gap-2">
+              <PenTool className="w-4 h-4 text-emerald-500" /> Email Signature Management ({signatures.length})
+            </h3>
+            {canManageSignatures && (
+              <button
+                onClick={() =>
+                  setEditingSig({
+                    name: "",
+                    font_family: "Verdana",
+                    font_size: "10pt",
+                    is_default: false,
+                    auto_insert: true,
+                    html_content: `<div style="font-family: Verdana, sans-serif; font-size: 10pt; color: #1f2937;"><p>Regards,</p><p><strong>Aven Industrial Automation</strong></p><p>📞 ${company.phone || "+91 8766918892"}<br/>📧 ${company.email || "sales@avenautomation.in"}<br/>🌐 ${company.website || "avenautomation.in"}</p></div>`,
+                  })
+                }
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> New Signature
+              </button>
+            )}
+          </div>
+
+          {editingSig && (
+            <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "border-zinc-700 bg-zinc-900" : "border-slate-300 bg-slate-50"}`}>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  placeholder="Signature Name"
+                  value={editingSig.name || ""}
+                  onChange={(e) => setEditingSig({ ...editingSig, name: e.target.value })}
+                  className={`px-3 py-2 rounded-lg border text-xs ${inputCls}`}
+                />
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingSig.is_default)}
+                    onChange={(e) => setEditingSig({ ...editingSig, is_default: e.target.checked })}
+                  />
+                  Set as Default Signature
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingSig.auto_insert !== false}
+                    onChange={(e) => setEditingSig({ ...editingSig, auto_insert: e.target.checked })}
+                  />
+                  Auto-Insert in Compose
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="px-3 py-1.5 rounded-lg border border-zinc-700 text-xs font-semibold cursor-pointer flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5" /> Upload / Replace Logo (Cloudinary)
+                  <input type="file" accept="image/png,image/jpeg" onChange={handleSignatureLogoUpload} className="hidden" />
+                </label>
+              </div>
+              <textarea
+                rows={5}
+                value={editingSig.html_content || ""}
+                onChange={(e) => setEditingSig({ ...editingSig, html_content: e.target.value })}
+                className={`w-full px-3 py-2 rounded-lg border text-xs font-mono ${inputCls}`}
+              />
+              <div className="p-3 rounded-lg bg-white text-zinc-900 border border-slate-200">
+                <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Live Preview</div>
+                <div dangerouslySetInnerHTML={{ __html: editingSig.html_content || "" }} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditingSig(null)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-600 cursor-pointer">
+                  Cancel
+                </button>
+                <button onClick={saveSignature} className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer">
+                  Save Signature
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {signatures.map((s) => (
+              <div key={s.id} className={`p-4 rounded-xl border space-y-3 ${isDark ? "border-zinc-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50"}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold">{s.name}</span>
+                    {s.is_default && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-1">
+                        <Star className="w-3 h-3" /> Default
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedSigId(s.id);
+                        setIncludeSignature(true);
+                        setActiveTab("compose");
+                      }}
+                      className="px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-600 text-white cursor-pointer"
+                    >
+                      Use
+                    </button>
+                    {canManageSignatures && (
+                      <button onClick={() => setEditingSig(s)} className="px-2.5 py-1 rounded text-[11px] border border-zinc-600 cursor-pointer">
+                        Edit
+                      </button>
+                    )}
+                    {canManageSignatures && s.id !== "sig_aven_default" && (
+                      <button
+                        onClick={async () => {
+                          await fetch(`/api/mail/signatures?id=${encodeURIComponent(s.id)}`, {
+                            method: "DELETE",
+                            headers: getAuthHeaders(),
+                          });
+                          await fetchMailData();
+                        }}
+                        className="p-1 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-white text-zinc-900 border border-slate-200">
+                  <div dangerouslySetInnerHTML={{ __html: s.html_content }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Email Preview Modal */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white text-zinc-900 rounded-xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-4 py-3 border-b flex items-center justify-between bg-slate-50">
+              <div>
+                <div className="text-xs font-bold">{subject || "(No Subject)"}</div>
+                <div className="text-[11px] text-slate-500">
+                  To: {[...toChips, ...parseEmailList(toInput)].join(", ") || "-"}
+                </div>
+              </div>
+              <button onClick={() => setPreviewOpen(false)} className="p-1.5 rounded hover:bg-slate-200 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1">
+              <div dangerouslySetInnerHTML={{ __html: buildFinalEmailHtml() }} />
+            </div>
           </div>
         </div>
       )}

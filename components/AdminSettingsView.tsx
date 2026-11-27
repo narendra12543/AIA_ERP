@@ -19,6 +19,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { CompanyInfo, User } from "../lib/types";
+import SecurityCenterSection from "./SecurityCenterSection";
 
 interface AdminSettingsViewProps {
   theme: "dark" | "light";
@@ -705,47 +706,50 @@ export default function AdminSettingsView({
 
       {/* 5. SECURITY & ACCESS */}
       {activeSection === "security" && (
-        <div className={`${cardCls} rounded-xl p-5 space-y-4`}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <div className="p-3 rounded-lg border border-zinc-800">
-              <div className="opacity-65">Password Expiry Policy</div>
-              <div className="font-bold mt-1">
-                {infra?.security.enablePasswordExpiry
-                  ? `${infra.security.passwordExpiryDays} Days Mandatory`
-                  : "Disabled"}
+        <div className="space-y-4">
+          <div className={`${cardCls} rounded-xl p-5 space-y-4`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 rounded-lg border border-zinc-800">
+                <div className="opacity-65">Password Expiry Policy</div>
+                <div className="font-bold mt-1">
+                  {infra?.security.enablePasswordExpiry
+                    ? `${infra.security.passwordExpiryDays} Days Mandatory`
+                    : "Disabled"}
+                </div>
+              </div>
+              <div className="p-3 rounded-lg border border-zinc-800">
+                <div className="opacity-65">RBAC Enforcement</div>
+                <div className="font-bold mt-1">
+                  {infra?.security.enableRbacEnforcement ? "Active (Default-Deny)" : "Disabled"}
+                </div>
+              </div>
+              <div className="p-3 rounded-lg border border-zinc-800">
+                <div className="opacity-65">Encryption Key Mode</div>
+                <div className="font-bold mt-1">
+                  {infra?.security.encryptionKeyExplicit ? "SETTINGS_ENCRYPTION_KEY" : "Derived Server Key"}
+                </div>
+              </div>
+              <div className="p-3 rounded-lg border border-zinc-800">
+                <div className="opacity-65">Session Timeout</div>
+                <div className="font-bold mt-1">Admin 20m / Staff 15m</div>
               </div>
             </div>
-            <div className="p-3 rounded-lg border border-zinc-800">
-              <div className="opacity-65">RBAC Enforcement</div>
-              <div className="font-bold mt-1">
-                {infra?.security.enableRbacEnforcement ? "Active (Default-Deny)" : "Disabled"}
-              </div>
-            </div>
-            <div className="p-3 rounded-lg border border-zinc-800">
-              <div className="opacity-65">Encryption Key Mode</div>
-              <div className="font-bold mt-1">
-                {infra?.security.encryptionKeyExplicit ? "SETTINGS_ENCRYPTION_KEY" : "Derived Server Key"}
-              </div>
-            </div>
-            <div className="p-3 rounded-lg border border-zinc-800">
-              <div className="opacity-65">Session Timeout</div>
-              <div className="font-bold mt-1">Admin 20m / Staff 15m</div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onOpenUserManagement}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer flex items-center gap-1.5"
+              >
+                <Users className="w-4 h-4" /> Manage Users &amp; Role Permissions
+              </button>
+              <button
+                onClick={onOpenAuditLogs}
+                className="px-4 py-2 rounded-lg text-xs font-semibold border border-zinc-700 hover:bg-zinc-800 cursor-pointer flex items-center gap-1.5"
+              >
+                <ScrollText className="w-4 h-4" /> View Security Audit Logs
+              </button>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={onOpenUserManagement}
-              className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer flex items-center gap-1.5"
-            >
-              <Users className="w-4 h-4" /> Manage Users & Role Permissions
-            </button>
-            <button
-              onClick={onOpenAuditLogs}
-              className="px-4 py-2 rounded-lg text-xs font-semibold border border-zinc-700 hover:bg-zinc-800 cursor-pointer flex items-center gap-1.5"
-            >
-              <ScrollText className="w-4 h-4" /> View Security Audit Logs
-            </button>
-          </div>
+          <SecurityCenterSection theme={theme} onOpenUserManagement={onOpenUserManagement} />
         </div>
       )}
     </div>

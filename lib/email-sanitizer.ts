@@ -95,6 +95,65 @@ export function sanitizeSensitiveBusinessData(text: string): {
   return { sanitized, redactedCount };
 }
 
+/**
+ * Protects sensitive business/customer values with reversible request-scoped tokens
+ * before sending text to an external AI provider, and restores them afterward.
+ */
+export function protectSensitiveBusinessData(text: string): {
+  protectedText: string;
+  tokenMap: Map<string, string>;
+  protectedCount: number;
+} {
+  const tokenMap = new Map<string, string>();
+  let idx = 0;
+  let out = text;
+
+  const patterns = [
+    /\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b/gi, // GSTIN
+    /\b[A-Z]{5}\d{4}[A-Z]{1}\b/g, // PAN
+    /\b[A-Z]{4}0[A-Z0-9]{6}\b/g, // IFSC
+    /\b\d{11,18}\b/g, // Bank account
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, // Email
+    /(?:\+91[\s-]?)?\b[6-9]\d{4}[\s-]?\d{5}\b/g, // Phone
+    /(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?/gi, // Commercial prices
+    /\bM\/s\.?\s+[A-Z][A-Za-z0-9 &.,-]{2,50}/g, // Customer org name
+    /(?:[-,\s])\b[1-9]\d{5}\b/g, // PIN code
+  ];
+
+  for (const rx of patterns) {
+    out = out.replace(rx, (match) => {
+      const token = `AVEN_PROT_${idx++}`;
+      tokenMap.set(token, match);
+      return token;
+    });
+  }
+
+  return { protectedText: out, tokenMap, protectedCount: idx };
+}
+
+export function restoreSensitiveBusinessData(
+  text: string,
+  tokenMap: Map<string, string>
+): { restoredText: string; unresolvedCount: number } {
+  let restoredText = text;
+  let unresolvedCount = 0;
+
+  for (const [token, original] of Array.from(tokenMap.entries())) {
+    if (restoredText.includes(token)) {
+      restoredText = restoredText.split(token).join(original);
+    } else {
+      unresolvedCount++;
+    }
+  }
+
+  // Catch any leftover placeholder tokens
+  if (/AVEN_PROT_\d+|\[REDACTED_[A-Z_]+\]/i.test(restoredText)) {
+    unresolvedCount++;
+  }
+
+  return { restoredText, unresolvedCount };
+}
+
 export interface DefaultEmailTemplateDef {
   id: string;
   name: string;

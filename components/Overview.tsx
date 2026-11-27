@@ -198,11 +198,22 @@ export default function Overview({
       return true;
     });
 
+    const parseFlexibleDateMs = (raw?: string): number => {
+  const s = (raw || "").trim();
+  if (!s) return 0;
+  const ddmmyyyy = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (ddmmyyyy) {
+    return new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}T00:00:00Z`).getTime() || 0;
+  }
+  const iso = new Date(s).getTime();
+  return Number.isFinite(iso) ? iso : 0;
+}
+
     return [...list].sort((a, b) => {
-      if (sortBy === "date_asc") return (a.date || "").localeCompare(b.date || "");
+      if (sortBy === "date_asc") return parseFlexibleDateMs(a.date) - parseFlexibleDateMs(b.date);
       if (sortBy === "amount_desc") return Number(b.total || 0) - Number(a.total || 0);
       if (sortBy === "amount_asc") return Number(a.total || 0) - Number(b.total || 0);
-      return (b.date || "").localeCompare(a.date || "");
+      return parseFlexibleDateMs(b.date) - parseFlexibleDateMs(a.date);
     });
   }, [filteredQuotes, searchQuery, statusFilter, revisionFilter, sortBy]);
 
@@ -586,14 +597,14 @@ export default function Overview({
           <table className="w-full min-w-[780px] text-xs text-left">
             <thead className={`${isDark ? "bg-zinc-950/60 border-zinc-800 text-zinc-400" : "bg-zinc-100 border-zinc-200 text-zinc-600"} border-b uppercase text-[10px] font-bold`}>
               <tr>
-                <th className="py-2.5 px-3">Quotation No</th>
-                <th className="py-2.5 px-3">Date</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Quotation No</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
                 <th className="py-2.5 px-3">Client Company</th>
                 <th className="py-2.5 px-3">Product / Subject</th>
                 <th className="py-2.5 px-3 text-center">Status</th>
-                <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Amount (₹)</th>
                 <th className="py-2.5 px-3 text-center">Docs</th>
-                <th className="py-2.5 px-3 text-right">Actions</th>
+                <th className={`py-2.5 px-3 text-right sticky right-0 z-10 ${isDark ? "bg-zinc-950" : "bg-zinc-100"} shadow-[-8px_0_12px_-6px_rgba(0,0,0,0.35)]`}>Actions</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${isDark ? "divide-zinc-800/70" : "divide-zinc-200"}`}>
@@ -610,9 +621,11 @@ export default function Overview({
                     onClick={() => onOpenQuotation(q)}
                     className={`transition cursor-pointer group ${rowHover}`}
                   >
-                    <td className={`py-2.5 px-3 font-mono font-bold group-hover:text-amber-400 flex items-center gap-2 ${isDark ? "text-white" : "text-zinc-900"}`}>
-                      <FileText className="w-3.5 h-3.5 text-zinc-400 group-hover:text-amber-400 shrink-0" />
-                      <span>{q.quotation_no}</span>
+                    <td className={`py-2.5 px-3 font-mono font-bold whitespace-nowrap group-hover:text-amber-400 ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5 text-zinc-400 group-hover:text-amber-400 shrink-0" />
+                        <span className="whitespace-nowrap">{q.quotation_no}</span>
+                      </div>
                     </td>
                     <td className="py-2.5 px-3 font-mono text-zinc-400 whitespace-nowrap">
                       {formatIsoToDdMmYyyy(q.date)}
@@ -648,7 +661,7 @@ export default function Overview({
                         )}
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <td className={`py-2.5 px-3 text-right sticky right-0 z-10 whitespace-nowrap ${isDark ? "bg-[#111113]" : "bg-white"} shadow-[-8px_0_12px_-6px_rgba(0,0,0,0.35)]`} onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => onOpenQuotation(q)}

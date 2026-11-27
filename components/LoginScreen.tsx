@@ -22,9 +22,45 @@ export default function LoginScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState(sessionMessage || "");
   const [isLoading, setIsLoading] = useState(false);
   const isDark = theme === "dark";
+
+  async function handleMfaVerify(e: React.FormEvent) {
+    e.preventDefault();
+    if (isLoading || !mfaChallengeToken) return;
+    setError("");
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/mfa", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "verify_login",
+          challengeToken: mfaChallengeToken,
+          code: useRecovery ? undefined : mfaCode.trim(),
+          recoveryCode: useRecovery ? mfaCode.trim() : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "MFA verification failed.");
+        setIsLoading(false);
+        return;
+      }
+      setMfaChallengeToken(null);
+      setMfaCode("");
+      setIsLoading(false);
+      onLogin(data.user, data.session);
+    } catch {
+      setIsLoading(false);
+      setError("Unable to verify MFA code.");
+    }
+  }
 
   async function handleStandardLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -63,6 +99,11 @@ export default function LoginScreen({
       // Clear sensitive local form state immediately after login
       setPassword("");
       setIsLoading(false);
+      if (data.mfaRequired && data.challengeToken) {
+        setMfaChallengeToken(data.challengeToken);
+        setMfaCode("");
+        return;
+      }
       onLogin(data.user, data.session);
     } catch {
       setIsLoading(false);
@@ -84,20 +125,14 @@ export default function LoginScreen({
         {/* Header / Logo */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-950 border border-zinc-800 text-amber-500 mb-3 shadow-lg">
-            <span className="text-2xl font-black">A</span>
+            <span className="text-2xl font-black">~</span>
           </div>
           <h1 className="text-lg font-black tracking-wider uppercase">
             AVEN INDUSTRIAL AUTOMATION
           </h1>
-          <p
-            className={`text-xs font-medium mt-1 ${
-              isDark ? "text-zinc-400" : "text-zinc-500"
-            }`}
-          >
-            A brand of SPARECONN SOLUTIONS PVT. LTD
-          </p>
+          
           <div className="inline-block mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            Enterprise ERP & Quotation System
+            Enterprise ERP 
           </div>
         </div>
 
@@ -108,7 +143,95 @@ export default function LoginScreen({
           </div>
         )}
 
-        {/* Credentials Form */}
+        {mfaChallengeToken ? (
+          <form onSubmit={handleMfaVerify} className="space-y-4 text-xs">
+            <div className={`p-3 rounded-lg border ${isDark ? "bg-amber-500/5 border-amber-500/30 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
+              <div className="font-bold mb-0.5">Two-Factor Authentication Required</div>
+              <div className="text-[11px] opacity-90">
+                {useRecovery
+                  ? "Enter one of your single-use backup recovery codes."
+                  : "Enter the 6-digit verification code from your authenticator app."}
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="erp-mfa-code"
+                className={`block font-semibold mb-1.5 ${
+                  isDark ? "text-zinc-300" : "text-zinc-700"
+                }`}
+              >
+                {useRecovery ? "Backup Recovery Code" : "6-Digit Authenticator Code"}
+              </label>
+              <input
+                id="erp-mfa-code"
+                type="text"
+                autoComplete="one-time-code"
+                inputMode={useRecovery ? "text" : "numeric"}
+                required
+                autoFocus
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                placeholder={useRecovery ? "XXXX-XXXX" : "000000"}
+                className={`w-full rounded-lg px-3.5 py-2.5 border text-sm font-mono tracking-widest text-center focus:outline-none transition min-h-[44px] ${
+                  isDark
+                    ? "bg-black border-zinc-700 text-white placeholder-zinc-600 focus:border-amber-500"
+                    : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-blue-500"
+                }`}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || !mfaCode.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black font-bold py-2.5 px-4 rounded-lg transition shadow-md cursor-pointer min-h-[44px]"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Code...</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Verify &amp; Sign In</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setUseRecovery((prev) => !prev);
+                  setMfaCode("");
+                  setError("");
+                }}
+                className={`text-[11px] font-semibold underline cursor-pointer ${
+                  isDark ? "text-zinc-400 hover:text-zinc-200" : "text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                {useRecovery ? "Use 6-digit authenticator code" : "Use backup recovery code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaChallengeToken(null);
+                  setMfaCode("");
+                  setUseRecovery(false);
+                  setError("");
+                }}
+                className={`text-[11px] font-semibold cursor-pointer ${
+                  isDark ? "text-zinc-400 hover:text-white" : "text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                Back to Sign In
+              </button>
+            </div>
+          </form>
+        ) : (
+        /* Credentials Form */
         <form onSubmit={handleStandardLogin} className="space-y-4 text-xs">
           <div>
             <label
@@ -193,6 +316,7 @@ export default function LoginScreen({
             )}
           </button>
         </form>
+        )}
 
         {/* System Access Information */}
         <div className={`mt-6 pt-4 border-t text-center ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
@@ -204,11 +328,7 @@ export default function LoginScreen({
           </p>
         </div>
 
-        <div className="mt-5 text-center">
-          <p className={`text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-            Protected ERP System &bull; Active GSTIN 27ABLCS1425N1ZX
-          </p>
-        </div>
+       
       </div>
     </div>
   );

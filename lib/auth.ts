@@ -16,7 +16,67 @@ export const DEFAULT_PASSWORD_EXPIRY_DAYS = Math.max(
 );
 export const ENABLE_PASSWORD_EXPIRY = process.env.ENABLE_PASSWORD_EXPIRY !== "false";
 export const ENABLE_RBAC_ENFORCEMENT = process.env.ENABLE_RBAC_ENFORCEMENT !== "false";
+export const ENABLE_MANDATORY_MFA =
+  (process.env.ENABLE_MANDATORY_MFA || "false").toLowerCase() === "true";
+export const ENABLE_DEVICE_APPROVAL =
+  (process.env.ENABLE_DEVICE_APPROVAL || "true").toLowerCase() !== "false";
 export const PASSWORD_HISTORY_LIMIT = 5;
+
+export function hashToken(raw: string): string {
+  return crypto.createHash("sha256").update(raw).digest("hex");
+}
+
+export function extractTrustedIp(req: NextRequest): string {
+  return (
+    req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "unknown"
+  );
+}
+
+export function checkOriginCsrf(req: NextRequest): boolean {
+  const method = req.method.toUpperCase();
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  const origin = req.headers.get("origin");
+  if (!origin) return true;
+  const host = req.headers.get("host");
+  if (!host) return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.host.toLowerCase() === host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export async function createSecurityAlert(params: {
+  severity?: "info" | "warning" | "critical";
+  category: string;
+  title: string;
+  message: string;
+  actorEmail?: string | null;
+  targetRef?: string | null;
+}) {
+  try {
+    const id = "alt_" + Date.now() + "_" + crypto.randomBytes(3).toString("hex");
+    await query(
+      `INSERT INTO security_alerts (id, severity, category, title, message, actor_email, target_ref)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id,
+        params.severity || "warning",
+        params.category,
+        params.title.slice(0, 190),
+        params.message.slice(0, 500),
+        params.actorEmail || null,
+        params.targetRef || null,
+      ]
+    );
+  } catch {
+    // non-fatal
+  }
+}
 
 const COMMON_WEAK_PASSWORDS = new Set([
   "123456789012",
@@ -171,10 +231,19 @@ export async function resetLoginAttempts(key: string) {
 
 export async function createSession(
   user: User,
-  options?: { mustChangePassword?: boolean; passwordExpiresAt?: string | null }
+  options?: {
+    mustChangePassword?: boolean;
+    passwordExpiresAt?: string | null;
+    mfaVerified?: boolean;
+    deviceVerified?: boolean;
+    deviceId?: string | null;
+    ipApprox?: string | null;
+    userAgent?: string | null;
+  }
 ): Promise<SessionData> {
   await initDb();
   const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashToken(token);
   const sessionId = "sess_" + crypto.randomBytes(12).toString("hex");
   const canonicalRole = normalizeRole(user.role);
   const mustChangePassword = Boolean(options?.mustChangePassword);
@@ -200,14 +269,35 @@ export async function createSession(
 
   try {
     await query(
-      `INSERT INTO sessions (id, user_id, role, token, expires_at, must_change_password)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [sessionId, user.id, canonicalRole, token, expiresAt.toISOString(), mustChangePassword]
+      `INSERT INTO sessions (id, user_id, role, token, token_hash, expires_at, must_change_password, mfa_verified, device_verified, device_id, ip_approx, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        sessionId,
+        user.id,
+        canonicalRole,
+        token,
+        tokenHash,
+        expiresAt.toISOString(),
+        mustChangePassword,
+        Boolean(options?.mfaVerified),
+        options?.deviceVerified !== undefined ? Boolean(options.deviceVerified) : true,
+        options?.deviceId || null,
+        options?.ipApprox || null,
+        options?.userAgent ? options.userAgent.slice(0, 240) : null,
+      ]
     );
-  } catch (e: any) {
-    console.error("Failed to persist session in PostgreSQL:", e?.message || e);
-    if (isProduction) {
-      throw new Error("Unable to persist authenticated session to database.");
+  } catch {
+    try {
+      await query(
+        `INSERT INTO sessions (id, user_id, role, token, expires_at, must_change_password)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [sessionId, user.id, canonicalRole, token, expiresAt.toISOString(), mustChangePassword]
+      );
+    } catch (e: any) {
+      console.error("Failed to persist session in PostgreSQL:", e?.message || e);
+      if (isProduction) {
+        throw new Error("Unable to persist authenticated session to database.");
+      }
     }
   }
 
@@ -226,21 +316,45 @@ export async function verifySession(token: string): Promise<SessionData | null> 
   await initDb();
 
   try {
-    const res = await query(
+    let res = await query(
       `SELECT s.id, s.user_id, s.role, s.expires_at, s.token, s.must_change_password AS sess_must_change,
-              u.email, u.name, u.role AS user_role, u.status, u.permissions,
-              u.must_change_password AS user_must_change, u.password_expires_at
+              s.mfa_verified, s.device_verified,
+              u.email, u.name, u.role AS user_role, u.status, u.approval_status, u.mfa_enabled,
+              u.permissions, u.must_change_password AS user_must_change, u.password_expires_at
        FROM sessions s
        JOIN users u ON s.user_id = u.id
        WHERE s.token = $1`,
       [token]
-    );
+    ).catch(() => null);
+
+    // Backward-compatible fallback query if migration 004 not yet applied
+    if (!res) {
+      res = await query(
+        `SELECT s.id, s.user_id, s.role, s.expires_at, s.token, s.must_change_password AS sess_must_change,
+                u.email, u.name, u.role AS user_role, u.status, u.permissions,
+                u.must_change_password AS user_must_change, u.password_expires_at
+         FROM sessions s
+         JOIN users u ON s.user_id = u.id
+         WHERE s.token = $1`,
+        [token]
+      );
+    }
 
     if (res && res.rows.length > 0) {
       const row = res.rows[0];
       const expiresAt = new Date(row.expires_at);
 
       if (row.status !== "active") {
+        await revokeSession(token);
+        return null;
+      }
+
+      if (row.approval_status && row.approval_status !== "Approved") {
+        await revokeSession(token);
+        return null;
+      }
+
+      if (row.mfa_enabled && row.mfa_verified === false) {
         await revokeSession(token);
         return null;
       }
@@ -355,6 +469,10 @@ export async function authenticateRequest(
   req: NextRequest,
   roleOrOptions?: "Admin" | "User" | AuthGuardOptions
 ): Promise<{ user: SessionData } | { error: string; status: number; code?: string }> {
+  if (!checkOriginCsrf(req)) {
+    return { error: "Forbidden: Cross-site request blocked (CSRF protection)", status: 403, code: "CSRF_BLOCKED" };
+  }
+
   const token =
     req.headers.get("x-tab-session") ||
     req.cookies.get("aven_session")?.value ||
@@ -383,10 +501,26 @@ export async function authenticateRequest(
   }
 
   if (opts.requiredRole === "Admin" && session.role !== "Admin") {
+    void createSecurityAlert({
+      severity: "warning",
+      category: "privilege_escalation",
+      title: "Unauthorized Admin Route Attempt",
+      message: `${session.email} (${session.role}) attempted an Admin-only operation on ${req.nextUrl.pathname}`,
+      actorEmail: session.email,
+      targetRef: req.nextUrl.pathname,
+    });
     return { error: "Forbidden: Admin privileges required", status: 403 };
   }
 
   if (ENABLE_RBAC_ENFORCEMENT && opts.requiredPermission && !hasPermission(session, opts.requiredPermission)) {
+    void createSecurityAlert({
+      severity: "warning",
+      category: "access_control",
+      title: "Permission Denied",
+      message: `${session.email} attempted ${req.nextUrl.pathname} without ${opts.requiredPermission}`,
+      actorEmail: session.email,
+      targetRef: opts.requiredPermission,
+    });
     return {
       error: `Forbidden: Missing required permission (${opts.requiredPermission})`,
       status: 403,

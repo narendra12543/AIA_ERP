@@ -4,7 +4,7 @@ const ExcelJS = require("exceljs");
 const { Pool } = require("pg");
 
 const DEFAULT_EXCEL_PATH =
-  "C:/Users/user/.gemini/antigravity/brain/1e04822f-1daf-42d2-a597-54b342b78751/.user_uploaded/media_1795713322018_e165b6b8.xlsm";
+  "C:/Users/user/.gemini/antigravity/brain/1e04822f-1daf-42d2-a597-54b342b78751/.user_uploaded/media_1795714510128_a822a3b7.xlsm";
 
 function cellToString(val) {
   if (val === null || val === undefined) return "";
@@ -298,7 +298,7 @@ async function main() {
     if (!cname || cname === "-") continue;
     const key = cname.toLowerCase();
     const existing = uniqueClientsMap.get(key) || {
-      id: `cli_${key.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}`,
+      id: `cli_${key.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 88)}`,
       name: cname,
       header: row.client_header || `To, ${cname}`,
       contact: "",
@@ -339,7 +339,17 @@ async function main() {
              place_of_supply = EXCLUDED.place_of_supply,
              data = EXCLUDED.data,
              updated_at = CURRENT_TIMESTAMP`,
-          [c.id, c.name, c.header, c.contact, c.email, c.gstin, c.address, c.place_of_supply, JSON.stringify(c)]
+          [
+            c.id.slice(0, 95),
+            c.name.slice(0, 250),
+            c.header,
+            c.contact.slice(0, 95),
+            c.email.slice(0, 250),
+            c.gstin.slice(0, 48),
+            c.address,
+            c.place_of_supply.slice(0, 95),
+            JSON.stringify(c),
+          ]
         );
         clientsInserted++;
       }
@@ -386,9 +396,26 @@ async function main() {
            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
            ON CONFLICT (quotation_no) DO NOTHING`,
           [
-            qId, q.quotation_no, q.date, q.client_name, q.client_email, q.client_contact, q.client_gstin, q.client_address,
-            q.subject, q.product_type, qObj.pi_number, q.tax_invoice_number, q.delivery_date, q.advance_received,
-            q.subtotal, q.tax_amount, q.round_off, q.total, q.is_maharashtra, JSON.stringify(qObj),
+            qId.slice(0, 95),
+            q.quotation_no.slice(0, 95),
+            q.date.slice(0, 48),
+            q.client_name.slice(0, 250),
+            q.client_email.slice(0, 250),
+            q.client_contact.slice(0, 95),
+            q.client_gstin.slice(0, 48),
+            q.client_address,
+            q.subject,
+            q.product_type.slice(0, 250),
+            qObj.pi_number.slice(0, 95),
+            q.tax_invoice_number.slice(0, 95),
+            q.delivery_date.slice(0, 95),
+            q.advance_received,
+            q.subtotal,
+            q.tax_amount,
+            q.round_off,
+            q.total,
+            q.is_maharashtra,
+            JSON.stringify(qObj),
           ]
         );
         if (res.rowCount > 0) quotesInserted++;

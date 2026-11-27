@@ -94,6 +94,8 @@ export interface User {
   email: string;
   role: "Admin" | "Staff" | "User" | "ADMIN" | "STAFF" | "USER";
   status?: string;
+  approval_status?: string;
+  mfa_enabled?: boolean;
   active?: boolean;
   password?: string;
   permissions?: string[];
@@ -176,6 +178,19 @@ export interface EmailTemplate {
   updated_at?: string;
 }
 
+export interface EmailSignature {
+  id: string;
+  name: string;
+  user_email?: string | null;
+  html_content: string;
+  logo_url?: string | null;
+  font_family?: string;
+  font_size?: string;
+  is_default?: boolean;
+  auto_insert?: boolean;
+  updated_at?: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -198,19 +213,51 @@ export interface SpecProfile {
 
 export interface Vendor {
   id: string;
+  vendor_code?: string;
   name: string;
+  trade_name?: string;
+  vendor_type?: string;
+  category?: string;
+  constitution?: string;
   contact_person?: string;
+  designation?: string;
   phone: string;
+  alt_phone?: string;
   email: string;
+  alt_email?: string;
+  website?: string;
+  gst_type?: string;
   gstin: string;
   pan?: string;
+  udyam_no?: string;
+  cin?: string;
   address: string;
+  address_line2?: string;
   shipping_address?: string;
   state: string;
+  state_code?: string;
   city?: string;
+  district?: string;
   pincode?: string;
+  country?: string;
   payment_terms?: string;
+  credit_period?: string;
+  currency?: string;
+  lead_time?: string;
+  freight_terms?: string;
+  preferred?: boolean;
+  remarks?: string;
+  bank_account_holder?: string;
+  bank_name?: string;
+  bank_branch?: string;
+  bank_account_no?: string;
+  bank_account_no_masked?: string;
+  bank_ifsc?: string;
+  documents?: Array<{ name: string; type: string; url: string; uploaded_at?: string }>;
+  approval_status?: "Pending Approval" | "Approved" | "Rejected";
+  operational_status?: "Active" | "Inactive" | "Blocked";
   notes?: string;
+  registered_at?: string;
   created_at?: string;
 }
 

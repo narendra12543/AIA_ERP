@@ -22,6 +22,8 @@ export type PermissionKey =
   | "vendors.add"
   | "vendors.edit"
   | "vendors.delete"
+  | "vendors.approve"
+  | "vendors.bank_view"
   | "spec_profiles.view"
   | "spec_profiles.manage"
   | "company.manage"
@@ -31,6 +33,7 @@ export type PermissionKey =
   | "mail.send"
   | "mail.sent_view"
   | "mail.templates"
+  | "mail.signatures"
   | "mail.settings"
   | "users.manage"
   | "permissions.manage"
@@ -81,6 +84,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "vendors.add", label: "Add Vendors", description: "Create new PO vendor records" },
       { key: "vendors.edit", label: "Edit Vendors", description: "Update PO vendor details" },
       { key: "vendors.delete", label: "Delete Vendors", description: "Remove PO vendor records" },
+      { key: "vendors.approve", label: "Approve Vendors", description: "Approve, reject, or block PO vendors" },
+      { key: "vendors.bank_view", label: "View Vendor Bank & Docs", description: "Access private vendor bank details and KYC documents" },
       { key: "spec_profiles.view", label: "View Spec Profiles", description: "Use Technical Specification Profiles" },
       { key: "spec_profiles.manage", label: "Manage Spec Profiles", description: "Create, edit, or delete spec profiles" },
     ],
@@ -100,6 +105,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "mail.send", label: "Send Emails", description: "Send emails via Zoho Mail integration" },
       { key: "mail.sent_view", label: "View Sent Emails", description: "View sent email history" },
       { key: "mail.templates", label: "Manage Email Templates", description: "Create and edit reusable email templates" },
+      { key: "mail.signatures", label: "Manage Signatures", description: "Create and edit email signatures" },
       { key: "mail.settings", label: "Mail Settings", description: "Configure Zoho Mail connection and signatures" },
     ],
   },

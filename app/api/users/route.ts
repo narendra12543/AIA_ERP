@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
     await initDb();
     const res = await query(
       `SELECT u.id, u.email, u.name, u.role, u.status, u.permissions,
+              u.approval_status, u.approved_by, u.approved_at, u.created_by,
+              u.mfa_enabled,
               u.password_changed_at, u.password_expires_at, u.must_change_password,
               u.password_policy_days, u.last_login_at, u.created_at,
               la.locked_until
@@ -38,6 +40,11 @@ export async function GET(req: NextRequest) {
         name: r.name,
         role: normalizeRole(r.role),
         status: r.status || "active",
+        approval_status: r.approval_status || "Pending Approval",
+        approved_by: r.approved_by || null,
+        approved_at: r.approved_at || null,
+        created_by: r.created_by || null,
+        mfa_enabled: Boolean(r.mfa_enabled),
         permissions: Array.isArray(r.permissions) ? r.permissions : undefined,
         password_changed_at: r.password_changed_at,
         password_expires_at: r.password_expires_at,
@@ -99,26 +106,26 @@ export async function POST(req: NextRequest) {
     const expiresIso = new Date(Date.now() + DEFAULT_PASSWORD_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     const res = await query(
-      `INSERT INTO users (id, email, name, role, password, status, permissions, password_changed_at, password_expires_at, must_change_password, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8, $9, $10)
-       RETURNING id, email, name, role, status, permissions, password_changed_at, password_expires_at, must_change_password, created_at`,
+      `INSERT INTO users (id, email, name, role, password, status, approval_status, created_by, permissions, password_changed_at, password_expires_at, must_change_password, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'inactive', 'Pending Approval', $6, $7, $8, $9, true, $10)
+       RETURNING id, email, name, role, status, approval_status, created_by, permissions, password_changed_at, password_expires_at, must_change_password, created_at`,
       [
         id,
         email.toLowerCase().trim(),
         name.trim(),
         canonicalRole,
         hashedPassword,
+        admin.email,
         assignedPermissions ? JSON.stringify(assignedPermissions) : null,
         nowIso,
         expiresIso,
-        Boolean(mustChangePassword),
         createdAt,
       ]
     );
 
     await logAudit(
       admin.userId,
-      "USER_CREATED",
+      "USER_CREATED_PENDING_APPROVAL",
       { targetEmail: email.toLowerCase().trim(), role: canonicalRole },
       { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" }
     );
@@ -148,6 +155,8 @@ export async function PUT(req: NextRequest) {
       id,
       role,
       status,
+      approvalAction,
+      suspensionReason,
       password,
       permissions,
       forcePasswordChange,
@@ -160,14 +169,20 @@ export async function PUT(req: NextRequest) {
     }
 
     await initDb();
-    const targetRes = await query(`SELECT id, email, role, status FROM users WHERE id = $1`, [id]);
+    const targetRes = await query(`SELECT id, email, role, status, approval_status FROM users WHERE id = $1`, [id]);
     if (!targetRes || targetRes.rows.length === 0) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     const target = targetRes.rows[0];
 
-    // Protect the last active Admin against deactivation or demotion
-    if (normalizeRole(target.role) === "Admin" && (status === "inactive" || (role && normalizeRole(role) !== "Admin"))) {
+    // Protect the last active Admin against deactivation, suspension, revocation, or demotion
+    const isDisablingAdmin =
+      status === "inactive" ||
+      status === "suspended" ||
+      ["reject", "revoke", "suspend"].includes(String(approvalAction || "")) ||
+      (role && normalizeRole(role) !== "Admin");
+
+    if (normalizeRole(target.role) === "Admin" && isDisablingAdmin) {
       const adminCountRes = await query(
         `SELECT COUNT(*) AS cnt FROM users WHERE LOWER(role) = 'admin' AND status = 'active'`
       );
@@ -236,16 +251,52 @@ export async function PUT(req: NextRequest) {
     }
 
     if (status) {
-      await query(`UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2`, [status, id]);
-      if (status === "inactive") {
+      await query(`UPDATE users SET status = $1, last_modified_by = $2, updated_at = NOW() WHERE id = $3`, [
+        status,
+        admin.email,
+        id,
+      ]);
+      if (status !== "active") {
         await revokeAllUserSessions(id);
       }
       await logAudit(
         admin.userId,
-        status === "inactive" ? "USER_DEACTIVATED" : "USER_ACTIVATED",
-        { targetEmail: target.email },
+        status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+        { targetEmail: target.email, status },
         { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" }
       );
+    }
+
+    if (approvalAction) {
+      const act = String(approvalAction);
+      if (act === "approve") {
+        await query(
+          `UPDATE users SET approval_status = 'Approved', status = 'active', approved_by = $1, approved_at = NOW(), last_modified_by = $1, updated_at = NOW() WHERE id = $2`,
+          [admin.email, id]
+        );
+        await logAudit(admin.userId, "USER_APPROVED", { targetEmail: target.email }, { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" });
+      } else if (act === "reject") {
+        await query(
+          `UPDATE users SET approval_status = 'Rejected', status = 'inactive', rejected_by = $1, rejected_at = NOW(), last_modified_by = $1, updated_at = NOW() WHERE id = $2`,
+          [admin.email, id]
+        );
+        await revokeAllUserSessions(id);
+        await logAudit(admin.userId, "USER_REJECTED", { targetEmail: target.email }, { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" });
+      } else if (act === "revoke") {
+        await query(
+          `UPDATE users SET approval_status = 'Revoked', status = 'inactive', last_modified_by = $1, updated_at = NOW() WHERE id = $2`,
+          [admin.email, id]
+        );
+        await revokeAllUserSessions(id);
+        await logAudit(admin.userId, "USER_ACCESS_REVOKED", { targetEmail: target.email }, { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" });
+      } else if (act === "suspend") {
+        await query(
+          `UPDATE users SET status = 'suspended', suspended_by = $1, suspension_reason = $2, last_modified_by = $1, updated_at = NOW() WHERE id = $3`,
+          [admin.email, String(suspensionReason || "Suspended by Administrator"), id]
+        );
+        await revokeAllUserSessions(id);
+        await logAudit(admin.userId, "USER_SUSPENDED", { targetEmail: target.email, reason: suspensionReason || "" }, { actorName: admin.name, module: "users", recordRef: id, outcome: "SUCCESS" });
+      }
     }
 
     if (unlockAccount === true) {

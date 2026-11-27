@@ -131,6 +131,7 @@ export default function QuotationSystem({
   const [selectedProfileName, setSelectedProfileName] = useState<string>(
     resolveTechnicalProfileName(currentQuote, specProfiles) || ""
   );
+  const [poVendorSearch, setPoVendorSearch] = useState<string>("");
 
   useEffect(() => {
     const profName = resolveTechnicalProfileName(currentQuote, specProfiles);
@@ -1884,21 +1885,39 @@ export default function QuotationSystem({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
-                    Select Supplier / Vendor *
-                  </label>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[11px] font-semibold text-zinc-400">
+                      Select Supplier / Vendor * (Vendor Master)
+                    </label>
+                    <input
+                      type="text"
+                      value={poVendorSearch}
+                      onChange={(e) => setPoVendorSearch(e.target.value)}
+                      placeholder="Filter code, name, GSTIN, phone..."
+                      className={`${inputBg} border rounded px-2 py-0.5 text-[11px] w-48`}
+                    />
+                  </div>
                   <select
                     value={selectedVendorId}
                     onChange={(e) => handleSelectVendor(e.target.value)}
                     className={`w-full ${inputBg} border rounded-lg px-3 py-2 font-medium`}
                   >
-                    <option value="">-- Choose from Registered Suppliers --</option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.gstin || "No GSTIN"})
-                      </option>
-                    ))}
+                    <option value="">-- Choose Approved Active Supplier --</option>
+                    {vendors
+                      .filter((v) => (v.approval_status || "Approved") === "Approved" && (v.operational_status || "Active") === "Active")
+                      .filter((v) => {
+                        const q = poVendorSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return `${v.vendor_code || ""} ${v.name || ""} ${v.gstin || ""} ${v.contact_person || ""} ${v.phone || ""} ${v.email || ""}`
+                          .toLowerCase()
+                          .includes(q);
+                      })
+                      .map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.vendor_code ? `${v.vendor_code} — ` : ""}{v.name} ({v.gstin || "Unregistered"})
+                        </option>
+                      ))}
                   </select>
                 </div>
 
