@@ -105,6 +105,35 @@ const INDIAN_STATES = [
   "30-Goa",
 ];
 
+function parseQuotationSortParts(quotationNo: string): { fy: number; serial: number; rev: number; raw: string } {
+  const raw = (quotationNo || "").trim();
+  const match = raw.match(/^(\d{2})-(\d{2})\/[^/]+\/(\d+)(?:-R(\d+))?/i);
+  if (match) {
+    return {
+      fy: parseInt(match[1], 10) * 100 + parseInt(match[2], 10),
+      serial: parseInt(match[3], 10),
+      rev: match[4] ? parseInt(match[4], 10) : 0,
+      raw,
+    };
+  }
+  const numMatch = raw.match(/(\d+)(?:-R(\d+))?$/i);
+  return {
+    fy: 0,
+    serial: numMatch ? parseInt(numMatch[1], 10) : 0,
+    rev: numMatch && numMatch[2] ? parseInt(numMatch[2], 10) : 0,
+    raw,
+  };
+}
+
+function sortQuotationsDesc(a: Quotation, b: Quotation): number {
+  const pa = parseQuotationSortParts(a.quotation_no);
+  const pb = parseQuotationSortParts(b.quotation_no);
+  if (pb.fy !== pa.fy) return pb.fy - pa.fy;
+  if (pb.serial !== pa.serial) return pb.serial - pa.serial;
+  if (pb.rev !== pa.rev) return pb.rev - pa.rev;
+  return pb.raw.localeCompare(pa.raw);
+}
+
 export default function QuotationSystem({
   currentQuote,
   company,
@@ -708,7 +737,7 @@ export default function QuotationSystem({
                     onChange={(e) => handleSelectQuoteNo(e.target.value)}
                     className={`${inputBg} border rounded px-3 py-1.5 text-xs font-mono max-w-xs truncate`}
                   >
-                    {allQuotations.map((q) => (
+                    {[...allQuotations].sort(sortQuotationsDesc).map((q) => (
                       <option key={q.quotation_no} value={q.quotation_no}>
                         {q.client_name ? `${q.client_name} | ` : ""}{q.quotation_no}
                         {q.quotation_no.includes("-R") ? ` [Rev ${q.quotation_no.split("-R")[1]}]` : ""}

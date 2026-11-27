@@ -65,11 +65,11 @@ export default function Page1Technical({
     ([k, v]) => k !== "Profile Name" && k !== "name" && v && String(v).trim()
   );
 
-  // Extract first item bullets for description intro
+  // Extract first item name and bullets for description intro
   const firstItem = quote.items && quote.items[0];
-  const bulletLines = firstItem?.name && firstItem.name.trim()
-    ? firstItem.name.split(/\r?\n/).slice(1).map((l) => l.trim()).filter(Boolean)
-    : [];
+  const firstItemLines = firstItem?.name ? firstItem.name.split(/\r?\n/) : [];
+  const firstItemTitle = (firstItemLines[0] || "").trim();
+  const bulletLines = firstItemLines.slice(1).map((l) => l.trim()).filter(Boolean);
 
   const clientHeader =
     quote.client_header ||
@@ -198,8 +198,14 @@ export default function Page1Technical({
           <p style={{ margin: "5px 0 0 0" }}>Dear Sir,</p>
           <p style={{ margin: "2px 0 0 0" }}>
             This is with reference to your requirement for the above-mentioned product for your
-            project. We are pleased to share our quotation for our{" "}
-            <strong>{quote.product_type || "Motorised Sliding Folding Gate"}</strong>:
+            project. We are pleased to share our quotation
+            {firstItemTitle ? (
+              <>
+                {" "}for our <strong>{firstItemTitle}</strong>:
+              </>
+            ) : (
+              "."
+            )}
           </p>
           {bulletLines.length > 0 && (
             <div style={{ paddingLeft: "10px", marginTop: "4px", fontSize: "8.5px", lineHeight: 1.35 }}>
