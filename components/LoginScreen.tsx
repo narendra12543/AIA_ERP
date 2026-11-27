@@ -1,8 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
-import { Lock, ArrowRight, AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Lock, ArrowRight, AlertCircle, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { User } from "../lib/types";
+import { Card, CardContent, CardFooter, CardHeader } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Alert } from "./ui/alert";
+import { Separator } from "./ui/separator";
 
 interface LoginScreenProps {
   onLogin: (
@@ -113,223 +120,218 @@ export default function LoginScreen({
 
   return (
     <div
-      className={`min-h-screen flex items-center justify-center p-4 ${
+      className={`min-h-screen flex items-center justify-center p-4 sm:p-6 ${
         isDark ? "bg-[#09090b] text-zinc-100" : "bg-zinc-100 text-zinc-900"
       }`}
     >
-      <div
-        className={`w-full max-w-md rounded-2xl border p-6 sm:p-8 shadow-2xl transition-all ${
-          isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200"
+      <Card
+        className={`w-full max-w-[420px] rounded-2xl shadow-2xl aven-fade-up ${
+          isDark ? "bg-[#111216] border-zinc-800" : "bg-white border-zinc-200"
         }`}
       >
-        {/* Header / Logo */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-950 border border-zinc-800 text-amber-500 mb-3 shadow-lg">
-            <span className="text-2xl font-black">~</span>
-          </div>
-          <h1 className="text-lg font-black tracking-wider uppercase">
-            AVEN INDUSTRIAL AUTOMATION
-          </h1>
-          
-          <div className="inline-block mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            Enterprise ERP 
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs px-3.5 py-2.5 rounded-lg flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {mfaChallengeToken ? (
-          <form onSubmit={handleMfaVerify} className="space-y-4 text-xs">
-            <div className={`p-3 rounded-lg border ${isDark ? "bg-amber-500/5 border-amber-500/30 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
-              <div className="font-bold mb-0.5">Two-Factor Authentication Required</div>
-              <div className="text-[11px] opacity-90">
-                {useRecovery
-                  ? "Enter one of your single-use backup recovery codes."
-                  : "Enter the 6-digit verification code from your authenticator app."}
-              </div>
-            </div>
-
-            <div>
-              <label
-                htmlFor="erp-mfa-code"
-                className={`block font-semibold mb-1.5 ${
-                  isDark ? "text-zinc-300" : "text-zinc-700"
-                }`}
-              >
-                {useRecovery ? "Backup Recovery Code" : "6-Digit Authenticator Code"}
-              </label>
-              <input
-                id="erp-mfa-code"
-                type="text"
-                autoComplete="one-time-code"
-                inputMode={useRecovery ? "text" : "numeric"}
-                required
-                autoFocus
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                placeholder={useRecovery ? "XXXX-XXXX" : "000000"}
-                className={`w-full rounded-lg px-3.5 py-2.5 border text-sm font-mono tracking-widest text-center focus:outline-none transition min-h-[44px] ${
-                  isDark
-                    ? "bg-black border-zinc-700 text-white placeholder-zinc-600 focus:border-amber-500"
-                    : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-blue-500"
-                }`}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading || !mfaCode.trim()}
-              className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black font-bold py-2.5 px-4 rounded-lg transition shadow-md cursor-pointer min-h-[44px]"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Verifying Code...</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4" />
-                  <span>Verify &amp; Sign In</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-
-            <div className="flex items-center justify-between pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setUseRecovery((prev) => !prev);
-                  setMfaCode("");
-                  setError("");
-                }}
-                className={`text-[11px] font-semibold underline cursor-pointer ${
-                  isDark ? "text-zinc-400 hover:text-zinc-200" : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                {useRecovery ? "Use 6-digit authenticator code" : "Use backup recovery code"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMfaChallengeToken(null);
-                  setMfaCode("");
-                  setUseRecovery(false);
-                  setError("");
-                }}
-                className={`text-[11px] font-semibold cursor-pointer ${
-                  isDark ? "text-zinc-400 hover:text-white" : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                Back to Sign In
-              </button>
-            </div>
-          </form>
-        ) : (
-        /* Credentials Form */
-        <form onSubmit={handleStandardLogin} className="space-y-4 text-xs">
-          <div>
-            <label
-              htmlFor="erp-login-email"
-              className={`block font-semibold mb-1.5 ${
-                isDark ? "text-zinc-300" : "text-zinc-700"
-              }`}
-            >
-              Work Email Address
-            </label>
-            <input
-              id="erp-login-email"
-              name="username"
-              type="email"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@avenautomation.in"
-              className={`w-full rounded-lg px-3.5 py-2.5 border text-xs font-medium focus:outline-none transition min-h-[42px] ${
-                isDark
-                  ? "bg-black border-zinc-700 text-white placeholder-zinc-500 focus:border-amber-500"
-                  : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-blue-500"
-              }`}
+        <CardHeader className="text-center items-center pb-4 pt-7 px-6 sm:px-7">
+          <div
+            className={`inline-flex items-center justify-center w-14 h-14 rounded-xl border mb-2.5 overflow-hidden shadow-sm ${
+              isDark ? "bg-white border-zinc-700" : "bg-zinc-50 border-zinc-200"
+            }`}
+          >
+            <img
+              src="/assets/logo.png"
+              alt="AVEN Industrial Automation"
+              className="w-11 h-11 object-contain"
             />
           </div>
+          <h1 className="text-base sm:text-lg font-black tracking-wider uppercase">
+            AVEN INDUSTRIAL AUTOMATION
+          </h1>
+          <Badge variant="success" className="mt-1.5 uppercase tracking-wider">
+            Enterprise ERP
+          </Badge>
+        </CardHeader>
 
-          <div>
-            <label
-              htmlFor="erp-login-password"
-              className={`block font-semibold mb-1.5 ${
-                isDark ? "text-zinc-300" : "text-zinc-700"
-              }`}
-            >
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="erp-login-password"
-                name="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className={`w-full rounded-lg pl-3.5 pr-10 py-2.5 border text-xs font-medium focus:outline-none transition min-h-[42px] ${
-                  isDark
-                    ? "bg-black border-zinc-700 text-white placeholder-zinc-500 focus:border-amber-500"
-                    : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-blue-500"
-                }`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((p) => !p)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded transition cursor-pointer ${
-                  isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
-                }`}
+        <CardContent className="px-6 sm:px-7 pb-5 space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </Alert>
+          )}
+
+          {mfaChallengeToken ? (
+            <form onSubmit={handleMfaVerify} className="space-y-4 text-xs">
+              <Alert variant="warning">
+                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold mb-0.5">Two-Factor Authentication Required</div>
+                  <div className="text-[11px] opacity-90">
+                    {useRecovery
+                      ? "Enter one of your single-use backup recovery codes."
+                      : "Enter the 6-digit verification code from your authenticator app."}
+                  </div>
+                </div>
+              </Alert>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="erp-mfa-code" className={isDark ? "text-zinc-300" : "text-zinc-700"}>
+                  {useRecovery ? "Backup Recovery Code" : "6-Digit Authenticator Code"}
+                </Label>
+                <Input
+                  id="erp-mfa-code"
+                  type="text"
+                  autoComplete="one-time-code"
+                  inputMode={useRecovery ? "text" : "numeric"}
+                  required
+                  autoFocus
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  placeholder={useRecovery ? "XXXX-XXXX" : "000000"}
+                  className={`h-11 font-mono tracking-widest text-center text-base ${
+                    isDark
+                      ? "bg-zinc-950 border-zinc-700 text-white placeholder:text-zinc-600"
+                      : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400"
+                  }`}
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isLoading || !mfaCode.trim()}
+                size="lg"
+                className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-md"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying Code...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Verify &amp; Sign In</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </Button>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black font-bold py-2.5 px-4 rounded-lg transition shadow-md cursor-pointer mt-2 min-h-[44px]"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Verifying Credentials...</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-4 h-4" />
-                <span>Sign In to ERP</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </form>
-        )}
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseRecovery((prev) => !prev);
+                    setMfaCode("");
+                    setError("");
+                  }}
+                  className={`text-[11px] font-semibold underline cursor-pointer transition-colors ${
+                    isDark ? "text-zinc-400 hover:text-zinc-200" : "text-zinc-600 hover:text-zinc-900"
+                  }`}
+                >
+                  {useRecovery ? "Use 6-digit authenticator code" : "Use backup recovery code"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMfaChallengeToken(null);
+                    setMfaCode("");
+                    setUseRecovery(false);
+                    setError("");
+                  }}
+                  className={`text-[11px] font-semibold cursor-pointer transition-colors ${
+                    isDark ? "text-zinc-400 hover:text-white" : "text-zinc-600 hover:text-zinc-900"
+                  }`}
+                >
+                  Back to Sign In
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleStandardLogin} className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <Label htmlFor="erp-login-email" className={isDark ? "text-zinc-300" : "text-zinc-700"}>
+                  Work Email Address
+                </Label>
+                <Input
+                  id="erp-login-email"
+                  name="username"
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@avenautomation.in"
+                  className={`h-11 ${
+                    isDark
+                      ? "bg-zinc-950 border-zinc-700 text-white placeholder:text-zinc-500 aven-autofill-dark"
+                      : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400 aven-autofill-light"
+                  }`}
+                />
+              </div>
 
-        {/* System Access Information */}
-        <div className={`mt-6 pt-4 border-t text-center ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
-          <p className={`text-[11px] font-semibold mb-1 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+              <div className="space-y-1.5">
+                <Label htmlFor="erp-login-password" className={isDark ? "text-zinc-300" : "text-zinc-700"}>
+                  Password
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="erp-login-password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className={`h-11 pr-10 ${
+                      isDark
+                        ? "bg-zinc-950 border-zinc-700 text-white placeholder:text-zinc-500 aven-autofill-dark"
+                        : "bg-white border-zinc-300 text-zinc-900 placeholder:text-zinc-400 aven-autofill-light"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((p) => !p)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors cursor-pointer ${
+                      isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                    }`}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isLoading}
+                size="lg"
+                className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-md mt-1"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying Credentials...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Sign In to ERP</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </Button>
+            </form>
+          )}
+        </CardContent>
+
+        <CardFooter className="flex-col px-6 sm:px-7 pb-6 pt-0 text-center">
+          <Separator className={`mb-4 ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`} />
+          <p className={`text-[11px] font-semibold mb-0.5 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
             Authorized Personnel Only
           </p>
-          <p className={`text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+          <p className={`text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
             Access is restricted to active AVEN ERP Administrators and Staff.
           </p>
-        </div>
-
-       
-      </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 }

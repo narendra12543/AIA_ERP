@@ -1,15 +1,34 @@
 "use client";
 
 import React from "react";
-import { LayoutDashboard, FileText, HelpCircle, Users, LogOut, X, Building2, Mail, ScrollText, KeyRound, Settings } from "lucide-react";
+import {
+  LayoutDashboard,
+  FileText,
+  HelpCircle,
+  Users,
+  LogOut,
+  Building2,
+  Mail,
+  ScrollText,
+  KeyRound,
+  Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 import { User } from "../lib/types";
 import { hasPermission } from "../lib/permissions";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { Sheet, SheetContent } from "./ui/sheet";
+import { Separator } from "./ui/separator";
+import { Badge } from "./ui/badge";
 
 interface SidebarProps {
   currentView: "overview" | "quotation" | "mail" | "settings";
   onSelectView: (view: "overview" | "quotation" | "mail" | "settings") => void;
   currentUser: User | null;
   theme?: "dark" | "light";
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onOpenUserManagement: () => void;
   onOpenVendorManagement?: () => void;
   onOpenAuditLogs?: () => void;
@@ -24,6 +43,8 @@ export default function Sidebar({
   onSelectView,
   currentUser,
   theme = "dark",
+  collapsed = false,
+  onToggleCollapse,
   onOpenUserManagement,
   onOpenVendorManagement,
   onOpenAuditLogs,
@@ -45,236 +66,322 @@ export default function Sidebar({
     if (onClose) onClose();
   };
 
-  return (
-    <>
-      {/* Mobile Backdrop Overlay */}
-      {isOpen && (
-        <div
-          onClick={onClose}
-          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm transition-opacity"
-          aria-hidden="true"
-        />
-      )}
-
-      <aside
-        className={`w-64 ${
-          isDark ? "bg-[#09090b] border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
-        } border-r flex flex-col justify-between h-screen fixed left-0 top-0 z-50 md:z-40 select-none transform transition-transform duration-300 ease-in-out ${
-          isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full md:translate-x-0"
+  function NavItem({
+    label,
+    icon,
+    active,
+    onClick,
+    isCollapsed,
+  }: {
+    label: string;
+    icon: React.ReactNode;
+    active?: boolean;
+    onClick: () => void;
+    isCollapsed: boolean;
+  }) {
+    const btn = (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group relative w-full flex items-center ${
+          isCollapsed ? "justify-center px-2" : "gap-3 px-3"
+        } py-2.5 min-h-[40px] rounded-lg text-xs font-medium transition-all duration-150 ease-in-out cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70 ${
+          active
+            ? isDark
+              ? "bg-zinc-800/95 text-white font-semibold border border-zinc-700/70 shadow-sm"
+              : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
+            : isDark
+            ? "text-zinc-400 hover:text-white hover:bg-zinc-900/90 border border-transparent"
+            : "text-zinc-600 hover:text-zinc-950 hover:bg-zinc-100 border border-transparent"
         }`}
       >
-        {/* Brand Header */}
+        <span
+          className={`absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full transition-all duration-200 ${
+            active ? (isDark ? "bg-amber-500 opacity-100 scale-y-100" : "bg-blue-600 opacity-100 scale-y-100") : "opacity-0 scale-y-50"
+          }`}
+          aria-hidden="true"
+        />
+        <span className="shrink-0 transition-transform duration-150 ease-in-out group-hover:scale-105 group-active:scale-95">
+          {icon}
+        </span>
+        {!isCollapsed && <span className="truncate">{label}</span>}
+      </button>
+    );
+
+    if (isCollapsed) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{btn}</TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      );
+    }
+    return btn;
+  }
+
+  function renderSidebarBody(isCollapsed: boolean, isMobileSheet = false) {
+    return (
+      <div className="flex flex-col justify-between h-full">
         <div>
-          <div className={`p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"} flex items-center justify-between gap-3`}>
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-zinc-900 text-white border border-zinc-700 flex items-center justify-center font-black text-lg tracking-tighter shadow-md">
+          {/* Brand Header */}
+          <div
+            className={`h-16 ${
+              isCollapsed ? "px-2 justify-center" : "px-4 justify-between"
+            } border-b ${isDark ? "border-zinc-800" : "border-zinc-200"} flex items-center gap-2.5`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-lg bg-zinc-900 text-white border border-zinc-700 flex items-center justify-center font-black text-base tracking-tighter shadow-sm shrink-0">
                 A
               </div>
-              <div className="flex-1 min-w-0">
-                <h1 className={`text-xs font-black tracking-wider uppercase truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
-                  AVEN AUTOMATION
-                </h1>
-                <p className={`text-[10px] font-medium truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                  Master ERP & Quotations
-                </p>
-              </div>
+              {!isCollapsed && (
+                <div className="flex-1 min-w-0">
+                  <h1 className={`text-xs font-black tracking-wider uppercase truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
+                    AVEN AUTOMATION
+                  </h1>
+                  {/* <p className={`text-[10px] font-medium truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                    Master ERP &amp; Quotations
+                  </p> */}
+                </div>
+              )}
             </div>
 
-            {/* Mobile Close Button */}
-            {onClose && (
-              <button
-                onClick={onClose}
-                className={`p-1.5 rounded-lg md:hidden ${
-                  isDark ? "text-zinc-400 hover:text-white hover:bg-zinc-800" : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-                } transition`}
-                aria-label="Close menu"
-              >
-                <X className="w-5 h-5" />
-              </button>
+            {!isMobileSheet && onToggleCollapse && !isCollapsed && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleCollapse}
+                    className={`hidden md:inline-flex p-1.5 rounded-lg transition-colors duration-150 cursor-pointer ${
+                      isDark ? "text-zinc-400 hover:text-white hover:bg-zinc-800" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+                    }`}
+                    aria-label="Collapse sidebar"
+                  >
+                    <PanelLeftClose className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Collapse Sidebar</TooltipContent>
+              </Tooltip>
             )}
           </div>
 
+          {!isMobileSheet && onToggleCollapse && isCollapsed && (
+            <div className="hidden md:flex justify-center pt-2.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleCollapse}
+                    className={`p-2 rounded-lg transition-colors duration-150 cursor-pointer ${
+                      isDark ? "text-zinc-400 hover:text-white hover:bg-zinc-800" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+                    }`}
+                    aria-label="Expand sidebar"
+                  >
+                    <PanelLeftOpen className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Expand Sidebar</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+
           {/* Navigation Section */}
-          <div className="px-3 py-4 space-y-1">
-            <p className={`px-3 text-[10px] font-bold tracking-wider uppercase mb-2 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-              Workspace
-            </p>
-
-            {/* Button 1: Overview */}
-            <button
-              onClick={() => handleNav("overview")}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                currentView === "overview"
-                  ? isDark
-                    ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
-                    : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
-                  : isDark
-                  ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                  : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span>Overview</span>
-            </button>
-
-            {/* Button 2: Quotation System */}
-            <button
-              onClick={() => handleNav("quotation")}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                currentView === "quotation"
-                  ? isDark
-                    ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
-                    : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
-                  : isDark
-                  ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                  : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>Quotation System</span>
-            </button>
-
-            {/* Button 3: Zoho Mail Center */}
-            {canUseMail && (
-              <button
-                onClick={() => handleNav("mail")}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  currentView === "mail"
-                    ? isDark
-                      ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
-                      : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
-                    : isDark
-                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-                }`}
-              >
-                <Mail className="w-4 h-4 text-emerald-500" />
-                <span>Mail Center</span>
-              </button>
+          <nav className="px-2.5 py-4 space-y-1" aria-label="Primary Workspace Navigation">
+            {!isCollapsed && (
+              <p className={`px-3 text-[10px] font-bold tracking-wider uppercase mb-2 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                Workspace
+              </p>
             )}
 
-            {/* Button 4: PO Vendors */}
-            {onOpenVendorManagement && canViewVendors && (
-              <button
+            <NavItem
+              label="Overview"
+              icon={<LayoutDashboard className="w-4 h-4" />}
+              active={currentView === "overview"}
+              onClick={() => handleNav("overview")}
+              isCollapsed={isCollapsed}
+            />
+
+            <NavItem
+              label="Quotation System"
+              icon={<FileText className="w-4 h-4" />}
+              active={currentView === "quotation"}
+              onClick={() => handleNav("quotation")}
+              isCollapsed={isCollapsed}
+            />
+
+            {canUseMail && (
+              <NavItem
+                label="Mail Center"
+                icon={<Mail className="w-4 h-4 text-emerald-500" />}
+                active={currentView === "mail"}
+                onClick={() => handleNav("mail")}
+                isCollapsed={isCollapsed}
+              />
+            )}
+
+            {/* {onOpenVendorManagement && canViewVendors && (
+              <NavItem
+                label="PO Vendors"
+                icon={<Building2 className="w-4 h-4 text-amber-500" />}
                 onClick={() => {
                   onOpenVendorManagement();
                   if (onClose) onClose();
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  isDark
-                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-                }`}
-              >
-                <Building2 className="w-4 h-4 text-amber-500" />
-                <span>PO Vendors</span>
-              </button>
+                isCollapsed={isCollapsed}
+              />
             )}
 
-            {/* Button 5: Security Audit Logs (Admin) */}
             {onOpenAuditLogs && canViewAuditLogs && (
-              <button
+              <NavItem
+                label="Audit Logs"
+                icon={<ScrollText className="w-4 h-4 text-indigo-400" />}
                 onClick={() => {
                   onOpenAuditLogs();
                   if (onClose) onClose();
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  isDark
-                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-                }`}
-              >
-                <ScrollText className="w-4 h-4 text-indigo-400" />
-                <span>Audit Logs</span>
-              </button>
-            )}
+                isCollapsed={isCollapsed}
+              />
+            )} */}
 
-            {/* Button 6: Admin Integration Settings */}
             {canOpenSettings && (
-              <button
+              <NavItem
+                label="Admin Settings"
+                icon={<Settings className="w-4 h-4 text-sky-400" />}
+                active={currentView === "settings"}
                 onClick={() => handleNav("settings")}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  currentView === "settings"
-                    ? isDark
-                      ? "bg-zinc-800 text-white font-semibold border border-zinc-700/60 shadow-sm"
-                      : "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-sm"
-                    : isDark
-                    ? "text-zinc-400 hover:text-white hover:bg-zinc-900"
-                    : "text-zinc-600 hover:text-black hover:bg-zinc-100"
-                }`}
-              >
-                <Settings className="w-4 h-4 text-sky-400" />
-                <span>Admin Settings</span>
-              </button>
+                isCollapsed={isCollapsed}
+              />
             )}
-          </div>
+          </nav>
         </div>
 
-      {/* Bottom Profile & System Section */}
-      <div className={`p-3 border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} space-y-3`}>
-        {/* Helpdesk link */}
-        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition cursor-pointer ${isDark ? "text-zinc-400 hover:text-white hover:bg-zinc-900" : "text-zinc-600 hover:text-black hover:bg-zinc-100"}`}>
-          <HelpCircle className="w-4 h-4 text-emerald-500" />
-          <span>Helpdesk & Docs</span>
-        </div>
+        {/* Bottom Profile & System Section */}
+        <div className={`p-2.5 border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} space-y-2.5`}>
+          <NavItem
+            label="Helpdesk & Docs"
+            icon={<HelpCircle className="w-4 h-4 text-emerald-500" />}
+            onClick={() => handleNav("overview")}
+            isCollapsed={isCollapsed}
+          />
 
-        {/* User Card */}
-        <div className={`p-3 rounded-lg border ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-xs uppercase ${isDark ? "bg-zinc-800 border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}>
-                {currentUser?.name?.slice(0, 2) || "NK"}
+          {isCollapsed ? (
+            <div className="flex flex-col items-center gap-1.5 pt-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onLogout()}
+                    className="p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 border border-rose-500/20 transition-colors cursor-pointer"
+                    aria-label="Sign Out"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Logout ({currentUser?.name || "User"})</TooltipContent>
+              </Tooltip>
+            </div>
+          ) : (
+            <div className={`p-3 rounded-xl border ${isDark ? "bg-zinc-900/80 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-xs uppercase shrink-0 ${
+                      isDark ? "bg-zinc-800 border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                    }`}
+                  >
+                    {currentUser?.name?.slice(0, 2) || "NK"}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-xs font-semibold truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {currentUser?.name || "Super Admin"}
+                    </p>
+                    <p className={`text-[10px] truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                      {currentUser?.email || "sales@avenautomation.in"}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="secondary" className="shrink-0 text-[9px] px-1.5 py-0.5 rounded">
+                  {currentUser?.role || "Admin"}
+                </Badge>
               </div>
-              <div className="min-w-0">
-                <p className={`text-xs font-semibold truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
-                  {currentUser?.name || "Super Admin"}
-                </p>
-                <p className={`text-[10px] truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                  {currentUser?.email || "info@avenautomation.in"}
-                </p>
+
+              <Separator className="my-2" />
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {canManageUsers && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenUserManagement();
+                      if (onClose) onClose();
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-medium rounded-md border transition-colors cursor-pointer ${
+                      isDark
+                        ? "text-zinc-300 hover:text-white bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50"
+                        : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"
+                    }`}
+                    title="Manage Users & Roles"
+                  >
+                    <Users className="w-3 h-3" />
+                    <span>Users</span>
+                  </button>
+                )}
+                {onOpenChangePassword && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenChangePassword();
+                      if (onClose) onClose();
+                    }}
+                    className={`flex items-center justify-center gap-1 py-1.5 px-2 text-[10px] font-medium rounded-md border transition-colors cursor-pointer ${
+                      isDark
+                        ? "text-zinc-300 hover:text-white bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50"
+                        : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"
+                    }`}
+                    title="Change Password"
+                  >
+                    <KeyRound className="w-3 h-3" />
+                    <span>PW</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onLogout()}
+                  className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 text-[10px] font-semibold text-rose-500 hover:text-rose-400 bg-rose-500/10 hover:bg-rose-500/15 rounded-md border border-rose-500/30 transition-colors cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span>Logout</span>
+                </button>
               </div>
             </div>
-            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${isDark ? "bg-zinc-800 text-zinc-300 border-zinc-700" : "bg-white text-zinc-700 border-zinc-300"}`}>
-              {currentUser?.role || "Admin"}
-            </span>
-          </div>
-
-          <div className={`flex flex-wrap items-center gap-1.5 pt-2 border-t ${isDark ? "border-zinc-800/80" : "border-zinc-200"}`}>
-            {canManageUsers && (
-              <button
-                onClick={onOpenUserManagement}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-1 text-[10px] rounded border transition cursor-pointer ${isDark ? "text-zinc-300 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 border-zinc-700/40" : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"}`}
-                title="Manage Users & Roles"
-              >
-                <Users className="w-3 h-3" />
-                <span>Users</span>
-              </button>
-            )}
-            {onOpenChangePassword && (
-              <button
-                onClick={() => {
-                  onOpenChangePassword();
-                  if (onClose) onClose();
-                }}
-                className={`flex items-center justify-center gap-1 py-1 px-2 text-[10px] rounded border transition cursor-pointer ${isDark ? "text-zinc-300 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 border-zinc-700/40" : "text-zinc-700 hover:text-black bg-white hover:bg-zinc-100 border-zinc-300"}`}
-                title="Change Password"
-              >
-                <KeyRound className="w-3 h-3" />
-                <span>PW</span>
-              </button>
-            )}
-            <button
-              onClick={() => onLogout()}
-              className="flex items-center justify-center gap-1.5 py-1 px-2.5 text-[10px] text-rose-500 hover:text-rose-600 bg-rose-50 dark:bg-rose-950/20 rounded border border-rose-200 dark:border-rose-900/40 transition cursor-pointer"
-              title="Sign Out"
-            >
-              <LogOut className="w-3 h-3" />
-              <span>Logout</span>
-            </button>
-          </div>
+          )}
         </div>
       </div>
-    </aside>
-    </>
+    );
+  }
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      {/* Desktop Persistent Collapsible Sidebar */}
+      <aside
+        className={`hidden md:flex flex-col h-screen fixed left-0 top-0 z-40 select-none border-r transition-[width] duration-250 ease-out overflow-hidden no-print ${
+          collapsed ? "w-[68px]" : "w-64"
+        } ${isDark ? "bg-[#09090b] border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+      >
+        {renderSidebarBody(collapsed, false)}
+      </aside>
+
+      {/* Mobile Accessible Shadcn Sheet Drawer */}
+      <Sheet open={isOpen} onOpenChange={(open) => { if (!open && onClose) onClose(); }}>
+        <SheetContent
+          side="left"
+          className={`p-0 md:hidden ${
+            isDark ? "bg-[#09090b] border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
+          }`}
+        >
+          {renderSidebarBody(false, true)}
+        </SheetContent>
+      </Sheet>
+    </TooltipProvider>
   );
 }

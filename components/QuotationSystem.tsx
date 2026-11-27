@@ -30,12 +30,13 @@ import {
   Mail,
 } from "lucide-react";
 import { Client, CompanyInfo, Quotation, QuotationItem, SpecProfile, Vendor } from "../lib/types";
-import { handleBulletKeyDown } from "../lib/bullet-helper";
+import { handleBulletKeyDown, insertBulletAtCursor } from "../lib/bullet-helper";
 import {
   calculateTotals,
   formatIsoToDdMmYyyy,
   inr,
   isIntraState,
+  nextPONumber,
   nextQuotationNo,
   numberToWordsINR,
   resolveTechnicalProfileName,
@@ -45,6 +46,7 @@ import Page1Technical from "./Page1Technical";
 import ProformaInvoice from "./ProformaInvoice";
 import TaxInvoice from "./TaxInvoice";
 import PurchaseOrder, { POData } from "./PurchaseOrder";
+import PurchaseOrderForm from "./PurchaseOrderForm";
 import DatabaseView from "./DatabaseView";
 import SpecProfilesView from "./SpecProfilesView";
 
@@ -297,48 +299,39 @@ export default function QuotationSystem({
   }
 
   // Dedicated PO Vendor State - Strictly separate from Client/Customer data
-  const defaultVendor = vendors && vendors.length > 0 ? vendors[0] : null;
-  const [selectedVendorId, setSelectedVendorId] = useState<string>(
-    defaultVendor ? defaultVendor.id : ""
-  );
+  const defaultVendor =
+    vendors && vendors.length > 0
+      ? vendors.find((v) => (v.approval_status || "Approved") === "Approved" && (v.operational_status || "Active") === "Active") || null
+      : null;
 
-  // PO State
   const [poData, setPoData] = useState<POData>({
-    po_number: "PO-2026-011",
+    po_number: nextPONumber([]),
     po_date: new Date().toISOString().slice(0, 10),
     delivery_date: "Within 4 weeks",
     payment_terms: defaultVendor?.payment_terms || "Advance",
-    project_ref: currentQuote.quotation_no,
-    vendor_id: defaultVendor?.id,
-    vendor_name: defaultVendor?.name || "Precision Steels & Tubes LLP",
-    vendor_address: defaultVendor?.address || "Plot No. 45, Sector 10, PCNTDA Bhosari, Pune - 411026",
-    vendor_gstin: defaultVendor?.gstin || "27AAACP1234F1Z8",
-    vendor_contact: defaultVendor?.phone || "9822014589",
-    vendor_email: defaultVendor?.email || "sales@precisionsteels.in",
-    items: currentQuote.items || [],
-    subtotal: currentQuote.subtotal,
+    project_ref: "",
+    vendor_id: defaultVendor?.id || "",
+    vendor_code: defaultVendor?.vendor_code || "",
+    vendor_name: defaultVendor?.name || "",
+    vendor_address: defaultVendor?.address || "",
+    vendor_gstin: defaultVendor?.gstin || "",
+    vendor_contact: defaultVendor?.phone || "",
+    vendor_email: defaultVendor?.email || "",
+    vendor_state: defaultVendor?.state || "",
+    vendor_state_code: defaultVendor?.state_code || "",
+    items: [{ id: "po_it_init", name: "", hsn: "", size: "", qty: 1, unit: "Nos", rate: 0, amount: 0 }],
+    subtotal: 0,
     tax_rate: 0.18,
-    tax_amount: currentQuote.tax_amount,
-    total: currentQuote.total,
-    terms: currentQuote.terms,
+    tax_amount: 0,
+    total: 0,
+    terms: "1. Goods to be delivered strictly in accordance with specifications.\n2. Invoice must state this PO Number.\n3. Payment as per agreed credit terms.",
+    instructions: "Inspect all items before dispatch to avoid quality disputes.\nE-way bill is required for consignments exceeding statutory threshold.",
+    status: "Draft",
   });
 
-  function handleSelectVendor(vId: string) {
-    setSelectedVendorId(vId);
-    const v = vendors.find((item) => item.id === vId);
-    if (v) {
-      setPoData((prev) => ({
-        ...prev,
-        vendor_id: v.id,
-        vendor_name: v.name,
-        vendor_address: v.address,
-        vendor_gstin: v.gstin,
-        vendor_contact: v.phone,
-        vendor_email: v.email,
-        payment_terms: v.payment_terms || prev.payment_terms,
-      }));
-    }
-  }
+  const [isSavingQuote, setIsSavingQuote] = useState(false);
+  const [isPrintingPdf, setIsPrintingPdf] = useState(false);
+  const commercialItemRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   // Handle direct field updates with VBA auto-sync logic
   function updateField<K extends keyof Quotation>(key: K, val: Quotation[K]) {
@@ -748,41 +741,63 @@ export default function QuotationSystem({
               </div>
 
               {/* Action Buttons: New, Revise, Save, Generate PDF */}
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
+                  type="button"
                   onClick={onNewQuote}
-                  className={`flex items-center gap-1.5 ${isDark ? "bg-black hover:bg-zinc-800 text-white border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-900 border-zinc-300 shadow-sm"} border font-bold text-xs px-3.5 py-1.5 rounded-lg transition cursor-pointer`}
+                  className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[38px] ${isDark ? "bg-black hover:bg-zinc-800 active:bg-zinc-900 text-white border-zinc-700" : "bg-white hover:bg-zinc-100 active:bg-zinc-200 text-zinc-900 border-zinc-300 shadow-sm"} border font-bold text-xs px-3.5 py-2 rounded-lg transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer`}
                   title="Create a new fresh quotation with next serial number"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+ NEW QUOTATION</span>
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">+ NEW QUOTATION</span>
                 </button>
 
                 {onReviseQuote && (
                   <button
+                    type="button"
                     onClick={onReviseQuote}
-                    className="flex items-center gap-1.5 bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[38px] bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 cursor-pointer"
                     title="Create a new revision of this quotation (e.g. -R1, -R2)"
                   >
-                    <FileCode2 className="w-3.5 h-3.5" />
-                    <span>REVISE QUOTATION</span>
+                    <FileCode2 className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">REVISE QUOTATION</span>
                   </button>
                 )}
 
                 <button
-                  onClick={handleSave}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                  type="button"
+                  disabled={isSavingQuote}
+                  onClick={async () => {
+                    if (isSavingQuote) return;
+                    setIsSavingQuote(true);
+                    try {
+                      await Promise.resolve(handleSave());
+                    } finally {
+                      setTimeout(() => setIsSavingQuote(false), 350);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[38px] bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 cursor-pointer"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>SAVE / UPDATE</span>
+                  <Save className={`w-3.5 h-3.5 shrink-0 ${isSavingQuote ? "animate-pulse" : ""}`} />
+                  <span className="truncate">{isSavingQuote ? "Saving..." : "SAVE / UPDATE"}</span>
                 </button>
 
                 <button
-                  onClick={onPrintBothPages}
-                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
+                  type="button"
+                  disabled={isPrintingPdf}
+                  onClick={async () => {
+                    if (isPrintingPdf) return;
+                    setIsPrintingPdf(true);
+                    try {
+                      await Promise.resolve(onPrintBothPages());
+                    } finally {
+                      setTimeout(() => setIsPrintingPdf(false), 800);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[38px] bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>GENERATE PDF</span>
+                  <Printer className={`w-3.5 h-3.5 shrink-0 ${isPrintingPdf ? "animate-pulse" : ""}`} />
+                  <span className="truncate">{isPrintingPdf ? "Generating PDF..." : "GENERATE PDF"}</span>
                 </button>
               </div>
             </div>
@@ -1092,9 +1107,9 @@ export default function QuotationSystem({
                     PRODUCT / SYSTEM DESIGN IMAGE (PAGE 1)
                   </h3>
                 </div>
-                <span className="text-[11px] text-zinc-400">
+                {/* <span className="text-[11px] text-zinc-400">
                   Each quotation stores its own unique design image
-                </span>
+                </span> */}
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-5">
@@ -1147,9 +1162,9 @@ export default function QuotationSystem({
                     ORDER, PROFORMA & TAX INVOICE DETAILS (AUTO-LINKED)
                   </h3>
                 </div>
-                <span className="text-[10px] text-zinc-400">
+                {/* <span className="text-[10px] text-zinc-400">
                   Excel Columns 58–71 &bull; Auto-links to active quote {currentQuote.quotation_no}
-                </span>
+                </span> */}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
@@ -1501,14 +1516,40 @@ export default function QuotationSystem({
                           {idx + 1}
                         </td>
                         <td className="py-2 px-3 min-w-[340px]">
-                          <textarea
-                            rows={4}
-                            value={it.name}
-                            onChange={(e) => handleItemChange(idx, "name", e.target.value)}
-                            onKeyDown={(e) => handleBulletKeyDown(e, it.name, (val) => handleItemChange(idx, "name", val))}
-                            placeholder="Motorised Sliding Folding Gate&#10;• Outer Frame: MS Square Tube - 72 x 72 mm&#10;• Intermediate Tubes: MS Square Tube"
-                            className={`w-full min-w-[320px] ${inputBg} border rounded p-2.5 text-xs leading-relaxed focus:ring-1 focus:ring-emerald-500`}
-                          />
+                          <div className="space-y-1.5">
+                            <textarea
+                              ref={(el) => {
+                                commercialItemRefs.current[idx] = el;
+                              }}
+                              rows={4}
+                              value={it.name}
+                              onChange={(e) => handleItemChange(idx, "name", e.target.value)}
+                              onKeyDown={(e) => handleBulletKeyDown(e, it.name, (val) => handleItemChange(idx, "name", val))}
+                              placeholder="Motorised Sliding Folding Gate&#10;• Outer Frame: MS Square Tube - 72 x 72 mm&#10;• Intermediate Tubes: MS Square Tube"
+                              className={`w-full min-w-[320px] ${inputBg} border rounded p-2.5 text-xs leading-relaxed focus:ring-1 focus:ring-emerald-500`}
+                            />
+                            <div className="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  insertBulletAtCursor(
+                                    commercialItemRefs.current[idx] || null,
+                                    it.name || "",
+                                    (val) => handleItemChange(idx, "name", val)
+                                  )
+                                }
+                                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border transition-colors duration-150 cursor-pointer ${
+                                  isDark
+                                    ? "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                                    : "border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
+                                }`}
+                                title="Insert a bullet point at cursor (Line 1 stays Item Name)"
+                              >
+                                <Plus className="w-2.5 h-2.5" /> Add Bullet
+                              </button>
+                              <span className={`text-[10px] ${labelColor}`}>Line 1 = Product Name</span>
+                            </div>
+                          </div>
                         </td>
                         <td className="py-2 px-3">
                           <input
@@ -1858,141 +1899,24 @@ export default function QuotationSystem({
         })()}
 
         {/* ============================================================ */}
-        {/* TAB 6: STANDALONE PURCHASE ORDER (PO)                        */}
+        {/* TAB 6: INDEPENDENT PURCHASE ORDER (PO)                       */}
         {/* ============================================================ */}
         {activeTab === "po" && (
-          <div className="space-y-4">
-            <div className={`w-full max-w-[210mm] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print px-3 py-2.5 ${cardBg} border rounded-lg`}>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold uppercase ${isDark ? "text-white" : "text-zinc-900"}`}>Purchase Order (PO)</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-800 rounded">
-                  {poData.po_number || "PO-AIA-001"}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-                {canSendEmail && onEmailDocument && (
-                  <button
-                    onClick={() => onEmailDocument("po")}
-                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
-                    title="Email Purchase Order PDF via Zoho Mail"
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Email PO</span>
-                  </button>
-                )}
-                {canExportPdf && (
-                  <button
-                    onClick={() => onPrintSinglePage("po")}
-                    className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition cursor-pointer"
-                    title="Save Official Purchase Order PDF"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Save Purchase Order (PDF)</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Dedicated PO Vendor Selection Control Panel */}
-            <div className={`w-full max-w-[210mm] mx-auto p-4 ${cardBg} border rounded-xl no-print space-y-3`}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3 border-zinc-700/50">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-amber-500" />
-                  <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-white" : "text-zinc-900"}`}>
-                    SUPPLIER / VENDOR SELECTION (PURCHASE ORDERS)
-                  </span>
-                </div>
-                {onOpenVendorModal && (
-                  <button
-                    onClick={onOpenVendorModal}
-                    className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-sm cursor-pointer self-start sm:self-auto"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Manage / Add Vendors</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                <div className="sm:col-span-2 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="block text-[11px] font-semibold text-zinc-400">
-                      Select Supplier / Vendor * (Vendor Master)
-                    </label>
-                    <input
-                      type="text"
-                      value={poVendorSearch}
-                      onChange={(e) => setPoVendorSearch(e.target.value)}
-                      placeholder="Filter code, name, GSTIN, phone..."
-                      className={`${inputBg} border rounded px-2 py-0.5 text-[11px] w-48`}
-                    />
-                  </div>
-                  <select
-                    value={selectedVendorId}
-                    onChange={(e) => handleSelectVendor(e.target.value)}
-                    className={`w-full ${inputBg} border rounded-lg px-3 py-2 font-medium`}
-                  >
-                    <option value="">-- Choose Approved Active Supplier --</option>
-                    {vendors
-                      .filter((v) => (v.approval_status || "Approved") === "Approved" && (v.operational_status || "Active") === "Active")
-                      .filter((v) => {
-                        const q = poVendorSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return `${v.vendor_code || ""} ${v.name || ""} ${v.gstin || ""} ${v.contact_person || ""} ${v.phone || ""} ${v.email || ""}`
-                          .toLowerCase()
-                          .includes(q);
-                      })
-                      .map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.vendor_code ? `${v.vendor_code} — ` : ""}{v.name} ({v.gstin || "Unregistered"})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
-                    PO Number
-                  </label>
-                  <input
-                    type="text"
-                    value={poData.po_number || ""}
-                    onChange={(e) => setPoData({ ...poData, po_number: e.target.value })}
-                    className={`w-full ${inputBg} border rounded-lg px-3 py-2 font-mono font-bold`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
-                    PO Date
-                  </label>
-                  <input
-                    type="date"
-                    value={poData.po_date || new Date().toISOString().slice(0, 10)}
-                    onChange={(e) => setPoData({ ...poData, po_date: e.target.value })}
-                    className={`w-full ${inputBg} border rounded-lg px-3 py-2 font-mono`}
-                  />
-                </div>
-              </div>
-
-              {selectedVendorId && (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs flex flex-col sm:flex-row justify-between gap-2 text-zinc-300">
-                  <div>
-                    <span className="font-bold text-amber-400">{poData.vendor_name}</span>
-                    <p className="text-[11px] text-zinc-400 mt-0.5">{poData.vendor_address}</p>
-                  </div>
-                  <div className="text-left sm:text-right text-[11px]">
-                    <p>GSTIN: <span className="font-mono font-bold text-amber-400">{poData.vendor_gstin}</span></p>
-                    <p>Phone: {poData.vendor_contact}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="w-full overflow-x-auto pb-6">
-              <PurchaseOrder po={poData} company={companyInfo || company} />
-            </div>
-          </div>
+          <PurchaseOrderForm
+            theme={theme}
+            company={companyInfo || company}
+            vendors={vendors}
+            allQuotations={allQuotations}
+            currentQuote={currentQuote}
+            poData={poData}
+            setPoData={setPoData}
+            canCreatePo={true}
+            canExportPdf={canExportPdf}
+            canSendEmail={canSendEmail}
+            onOpenVendorModal={onOpenVendorModal}
+            onPrintPo={() => onPrintSinglePage("po")}
+            onEmailPo={onEmailDocument ? () => onEmailDocument("po") : undefined}
+          />
         )}
 
         {/* ============================================================ */}

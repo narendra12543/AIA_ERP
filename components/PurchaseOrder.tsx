@@ -18,8 +18,31 @@ export default function PurchaseOrderComponent({ po, company }: PurchaseOrderPro
     (acc, it) => acc + (Number(it.amount) || (Number(it.qty || 0) * Number(it.rate || it.price || 0)) || 0),
     0
   );
-  const taxAmount = subtotal * 0.18;
-  const total = Math.round(subtotal + taxAmount);
+  const additionalCharges = Math.max(0, Number(po.additional_charges) || 0);
+  const discount = Math.max(0, Number(po.discount) || 0);
+  const taxableAmount = Math.max(0, subtotal + additionalCharges - discount);
+  const taxRate = po.tax_rate !== undefined && po.tax_rate >= 0 ? Number(po.tax_rate) : 0.18;
+  const taxAmount = taxableAmount * taxRate;
+  const total = Math.round(taxableAmount + taxAmount);
+
+  function renderInstructions(instructionsText?: string) {
+    if (!instructionsText || !instructionsText.trim()) {
+      return (
+        <>
+          <div>• Inspect all items before dispatch to avoid quality disputes.</div>
+          <div>• E-way bill is required for consignments exceeding statutory threshold.</div>
+        </>
+      );
+    }
+    const lines = instructionsText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    return (
+      <>
+        {lines.map((l, idx) => (
+          <div key={idx}>• {l.replace(/^[•\-\*]\s*/, "")}</div>
+        ))}
+      </>
+    );
+  }
 
   function renderTerms(termsText?: string) {
     if (!termsText) return null;
@@ -111,7 +134,7 @@ export default function PurchaseOrderComponent({ po, company }: PurchaseOrderPro
           <div style={{ fontWeight: 800, fontSize: "10px", marginTop: "2px", color: "#000000" }}>Vendor: {po.vendor_name || po.client_name || "Vendor Name"}</div>
           <div style={{ color: "#111111", marginTop: "1.5px" }}>Add: {po.vendor_address || po.client_address || "Vendor Address"}</div>
           <div style={{ color: "#111111", marginTop: "1.5px" }}>
-            Contact: {po.client_contact || "-"} | GSTIN: {po.vendor_gstin || po.client_gstin || "-"}
+            Contact: {po.vendor_contact || po.vendor_phone || po.client_contact || "-"} | GSTIN: {po.vendor_gstin || po.client_gstin || "-"}
           </div>
         </div>
 
@@ -205,10 +228,10 @@ export default function PurchaseOrderComponent({ po, company }: PurchaseOrderPro
               <tbody>
                 <tr style={{ borderBottom: "1px solid #000000" }}>
                   <td style={{ padding: "4px 8px" }}>Taxable Amount</td>
-                  <td style={{ textAlign: "right", fontFamily: "monospace", padding: "4px 8px" }}>{inr.format(subtotal)}</td>
+                  <td style={{ textAlign: "right", fontFamily: "monospace", padding: "4px 8px" }}>{inr.format(taxableAmount)}</td>
                 </tr>
                 <tr style={{ borderBottom: "1px solid #000000" }}>
-                  <td style={{ padding: "4px 8px" }}>GST (18%)</td>
+                  <td style={{ padding: "4px 8px" }}>GST ({Math.round(taxRate * 100)}%)</td>
                   <td style={{ textAlign: "right", fontFamily: "monospace", padding: "4px 8px" }}>{inr.format(taxAmount)}</td>
                 </tr>
                 <tr style={{ fontWeight: "bold" }}>
@@ -227,8 +250,7 @@ export default function PurchaseOrderComponent({ po, company }: PurchaseOrderPro
         <div style={{ display: "flex", flexDirection: "row", fontSize: "8.5px", boxSizing: "border-box" }}>
           <div style={{ flex: 1, padding: "6px 10px", lineHeight: 1.4 }}>
             <div style={{ fontWeight: 900, fontSize: "9px", marginBottom: "2px" }}>INSTRUCTIONS TO VENDOR</div>
-            <div>• Inspect all items before dispatch to avoid quality disputes.</div>
-            <div>• E-way bill is required for consignments exceeding statutory threshold.</div>
+            {renderInstructions(po.instructions)}
           </div>
           <div style={{ width: "185px", padding: "6px 10px", display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "center", textAlign: "center" }}>
             <div style={{ fontWeight: 900, fontSize: "9px" }}>AVEN INDUSTRIAL AUTOMATION</div>

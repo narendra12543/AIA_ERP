@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { initDb, query } from "@/lib/db";
 import { authenticateRequest, logAudit } from "@/lib/auth";
 import { sanitizeEmailHtml } from "@/lib/email-sanitizer";
 
@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: auth.error, code: auth.code }, { status: auth.status });
   }
 
+  await initDb();
   await ensureDefaultSignatureSeeded();
   try {
     const res = await query(

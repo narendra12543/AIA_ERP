@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Quotation, Vendor, User } from "../lib/types";
 import { inr, formatIsoToDdMmYyyy } from "../lib/vba-engine";
+import { Badge } from "./ui/badge";
 
 interface OverviewProps {
   quotations: Quotation[];
@@ -739,20 +740,20 @@ export default function Overview({
                   {q.product_type || q.subject || "-"}
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                  <Badge variant={q.status === "Accepted" ? "success" : q.status === "Sent" ? "info" : "secondary"}>
                     {q.status || "Draft"}
-                  </span>
+                  </Badge>
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => onOpenQuotation(q)}
-                      className="px-2.5 py-1.5 rounded bg-zinc-800 text-zinc-200 text-[11px] font-semibold cursor-pointer"
+                      className="px-2.5 py-1.5 min-h-[36px] rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-semibold transition-colors cursor-pointer"
                     >
                       Open
                     </button>
                     {canExportPdf && onPrintQuotation && (
                       <button
                         onClick={() => onPrintQuotation(q)}
-                        className="px-2.5 py-1.5 rounded bg-emerald-600 text-white text-[11px] font-semibold cursor-pointer"
+                        className="px-2.5 py-1.5 min-h-[36px] rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-colors cursor-pointer"
                       >
                         PDF
                       </button>
@@ -760,7 +761,7 @@ export default function Overview({
                     {canSendEmail && onSendEmail && (
                       <button
                         onClick={() => onSendEmail(q)}
-                        className="px-2.5 py-1.5 rounded bg-sky-600 text-white text-[11px] font-semibold cursor-pointer"
+                        className="px-2.5 py-1.5 min-h-[36px] rounded-md bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold transition-colors cursor-pointer"
                       >
                         Email
                       </button>

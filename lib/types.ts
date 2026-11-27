@@ -274,9 +274,11 @@ export interface POItem {
 }
 
 export interface PurchaseOrder {
+  id?: string;
   po_number: string;
   po_date: string;
   vendor_id?: string;
+  vendor_code?: string;
   vendor_name?: string;
   vendor_contact?: string;
   vendor_phone?: string;
@@ -284,15 +286,32 @@ export interface PurchaseOrder {
   vendor_address?: string;
   vendor_gstin?: string;
   vendor_state?: string;
+  vendor_state_code?: string;
+  vendor_reference?: string;
+  supplier_quote_ref?: string;
+  reference_date?: string;
+  linked_quotation_no?: string;
   delivery_date?: string;
+  delivery_location?: string;
+  billing_info?: string;
+  shipping_info?: string;
+  freight?: string;
+  packaging?: string;
+  installation?: string;
   payment_terms?: string;
   project_ref?: string;
   items: POItem[];
   subtotal?: number;
+  additional_charges?: number;
+  discount?: number;
+  taxable_amount?: number;
   tax_rate?: number;
   tax_amount?: number;
   total?: number;
   terms?: string;
+  instructions?: string;
+  internal_remarks?: string;
+  status?: "Draft" | "Issued" | "Sent" | "Completed" | "Cancelled";
   client_name?: string;
   [key: string]: any;
 }

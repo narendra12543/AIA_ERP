@@ -116,6 +116,45 @@ export function nextTaxInvoiceNumber(quotes: Quotation[] = []): string {
   return `${fyFull}-AIA-${String(maxN + 1).padStart(3, "0")}`;
 }
 
+// 4b. Next Unique Purchase Order Number (e.g. PO-2026-001)
+export function nextPONumber(pos: { po_number?: string }[] = []): string {
+  const year = new Date().getFullYear();
+  const prefix = `PO-${year}-`;
+  let maxN = 0;
+
+  for (const p of pos) {
+    const poVal = (p.po_number || "").trim();
+    const match = poVal.match(new RegExp(`^PO-${year}-(\\d+)`, "i"));
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (!isNaN(n) && n > maxN) maxN = n;
+    }
+  }
+
+  return `${prefix}${String(maxN + 1).padStart(3, "0")}`;
+}
+
+export function calculatePOTotals(
+  items: { qty?: number; rate?: number; price?: number; amount?: number }[] = [],
+  taxRate = 0.18,
+  additionalCharges = 0,
+  discount = 0
+) {
+  const subtotal = items.reduce((acc, it) => {
+    const qty = Number(it.qty) || 0;
+    const rate = Number(it.rate ?? it.price) || 0;
+    const amt = Number(it.amount) || qty * rate;
+    return acc + amt;
+  }, 0);
+  const charges = Math.max(0, Number(additionalCharges) || 0);
+  const disc = Math.max(0, Number(discount) || 0);
+  const taxable_amount = Math.max(0, subtotal + charges - disc);
+  const rateVal = Number(taxRate) >= 0 ? Number(taxRate) : 0.18;
+  const tax_amount = taxable_amount * rateVal;
+  const total = Math.round(taxable_amount + tax_amount);
+  return { subtotal, additional_charges: charges, discount: disc, taxable_amount, tax_rate: rateVal, tax_amount, total };
+}
+
 // 5. Intra-State Check (Maharashtra = 27)
 export function isIntraState(placeOfSupply: string = ""): boolean {
   const clean = (placeOfSupply || "").trim().toUpperCase();

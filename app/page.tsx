@@ -38,6 +38,7 @@ import { exportElementsToPdf } from "../lib/pdf-export";
 export default function Home() {
   const [currentView, setCurrentView] = useState<"overview" | "quotation" | "mail" | "settings">("quotation");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -765,6 +766,8 @@ export default function Home() {
           }}
           currentUser={currentUser}
           theme={theme}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
           onOpenUserManagement={() => {
             refreshUsers();
             setIsUserModalOpen(true);
@@ -785,7 +788,11 @@ export default function Home() {
         />
 
         {/* Main App Content */}
-        <main className="flex-1 ml-0 md:ml-64 flex flex-col min-w-0 w-full overflow-x-hidden">
+        <main
+          className={`flex-1 ml-0 ${
+            sidebarCollapsed ? "md:ml-[68px]" : "md:ml-64"
+          } transition-[margin-left] duration-250 ease-out flex flex-col min-w-0 w-full overflow-x-hidden`}
+        >
           <Header
             title={
               currentView === "overview"
@@ -817,6 +824,7 @@ export default function Home() {
             }}
             onOpenChangePassword={() => setIsChangePasswordOpen(true)}
             onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
+            onLogout={handleLogout}
           />
 
           {/* Password Expiry Reminder Banner (<= 5 days remaining) */}
@@ -899,10 +907,14 @@ export default function Home() {
                 vendors={vendors}
                 composeSeed={mailSeed}
                 onClearSeed={() => setMailSeed(null)}
-                onOpenAdminSettings={() => setCurrentView("settings")}
+                onOpenAdminSettings={
+                  (currentUser.role || "").toUpperCase() === "ADMIN"
+                    ? () => setCurrentView("settings")
+                    : undefined
+                }
               />
             </div>
-          ) : currentView === "settings" ? (
+          ) : currentView === "settings" && (currentUser.role || "").toUpperCase() === "ADMIN" ? (
             <div className="w-full flex-1 flex flex-col">
               <AdminSettingsView
                 theme={theme}

@@ -52,7 +52,56 @@ import {
   PenTool,
   Upload,
   Star,
+  Indent,
+  Outdent,
+  Minus,
+  Quote,
+  Smile,
+  ImagePlus,
+  Unlink,
+  Inbox,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+
+const FontSizeTextStyle = TextStyle.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      fontSize: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.style.fontSize || null,
+        renderHTML: (attributes: Record<string, any>) => {
+          if (!attributes.fontSize) return {};
+          return { style: `font-size: ${attributes.fontSize}` };
+        },
+      },
+    };
+  },
+});
+
+const BLOCKED_ATTACH_EXT = /\.(exe|bat|cmd|sh|js|mjs|vbs|scr|msi|com|pif|dll)$/i;
+const ALLOWED_ATTACH_ACCEPT =
+  ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.jpg,.jpeg,.png,.webp";
+
+const FALLBACK_AVEN_SIGNATURE: EmailSignature = {
+  id: "sig_aven_default",
+  name: "AVEN Official Signature",
+  html_content: `<div style="font-family: Verdana, Geneva, sans-serif; font-size: 10pt; line-height: 1.5; color: #1f2937;">
+  <p style="margin: 0 0 4px 0;">Regards,</p>
+  <p style="margin: 0 0 6px 0;"><strong>Aven Industrial Automation</strong></p>
+  <p style="margin: 0 0 2px 0;">📞 +91 8766918892</p>
+  <p style="margin: 0 0 2px 0;">📧 <a href="mailto:sales@avenautomation.in" style="color: #1d4ed8; text-decoration: none;">sales@avenautomation.in</a></p>
+  <p style="margin: 0 0 8px 0;">🌐 <a href="https://avenautomation.in" style="color: #1d4ed8; text-decoration: none;">avenautomation.in</a></p>
+  <img src="/assets/logo.png" alt="AVEN Industrial Automation" style="height: 46px; width: auto; display: block;" />
+</div>`,
+  logo_url: "/assets/logo.png",
+  font_family: "Verdana",
+  font_size: "10pt",
+  is_default: true,
+  auto_insert: true,
+};
 import {
   CompanyInfo,
   EmailDraft,
@@ -135,29 +184,42 @@ export default function MailCenter({
   const canEditSettings = hasPermission(currentUser, "mail.settings");
 
   const [activeTab, setActiveTab] = useState<
-    "compose" | "drafts" | "history" | "templates" | "signatures"
+    "compose" | "inbox" | "drafts" | "history" | "templates" | "signatures"
   >("compose");
   const [loading, setLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showCc, setShowCc] = useState(true);
   const [showBcc, setShowBcc] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [showMoreTools, setShowMoreTools] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [dragOverAttach, setDragOverAttach] = useState(false);
 
   const [zohoStatus, setZohoStatus] = useState<{
     configured: boolean;
+    enabled?: boolean;
     host: string;
     port: number;
     senderEmail: string | null;
     fromName: string;
     defaultCc: string | null;
+    lastTestResult?: string | null;
+    lastTestAt?: string | null;
+    lastTestError?: string | null;
+    oauthConfigured?: boolean;
   } | null>(null);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [history, setHistory] = useState<EmailHistoryEntry[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
-  const [signatures, setSignatures] = useState<EmailSignature[]>([]);
-  const [selectedSigId, setSelectedSigId] = useState<string>("");
+  const [signatures, setSignatures] = useState<EmailSignature[]>([FALLBACK_AVEN_SIGNATURE]);
+  const [selectedSigId, setSelectedSigId] = useState<string>("sig_aven_default");
   const [includeSignature, setIncludeSignature] = useState(true);
+  const [userTouchedSignature, setUserTouchedSignature] = useState(false);
+  const [customSigOverrideHtml, setCustomSigOverrideHtml] = useState<string | null>(null);
+  const [editingCurrentSig, setEditingCurrentSig] = useState(false);
+  const [lineSpacing, setLineSpacing] = useState("1.5");
 
   // Composer state
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -194,24 +256,25 @@ export default function MailCenter({
   const [fontSize, setFontSize] = useState("10pt");
 
   const activeSignature = useMemo(() => {
+    const list = signatures.length > 0 ? signatures : [FALLBACK_AVEN_SIGNATURE];
     return (
-      signatures.find((s) => s.id === selectedSigId) ||
-      signatures.find((s) => s.is_default) ||
-      signatures[0] ||
-      null
+      list.find((s) => s.id === selectedSigId) ||
+      list.find((s) => s.is_default) ||
+      list[0] ||
+      FALLBACK_AVEN_SIGNATURE
     );
   }, [signatures, selectedSigId]);
 
   const activeSignatureHtml = useMemo(() => {
     if (!includeSignature || !activeSignature) return "";
-    return activeSignature.html_content || "";
-  }, [includeSignature, activeSignature]);
+    return customSigOverrideHtml !== null ? customSigOverrideHtml : activeSignature.html_content || "";
+  }, [includeSignature, activeSignature, customSigOverrideHtml]);
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       Underline,
-      TextStyle,
+      FontSizeTextStyle,
       Color,
       FontFamily,
       Highlight.configure({ multicolor: true }),
@@ -275,8 +338,8 @@ export default function MailCenter({
     setLoading(true);
     try {
       const [mailRes, sigRes] = await Promise.all([
-        fetch("/api/mail", { headers: getAuthHeaders() }),
-        fetch("/api/mail/signatures", { headers: getAuthHeaders() }),
+        fetch("/api/mail", { credentials: "same-origin", headers: getAuthHeaders() }),
+        fetch("/api/mail/signatures", { credentials: "same-origin", headers: getAuthHeaders() }),
       ]);
       const data = await mailRes.json();
       if (mailRes.ok) {
@@ -289,12 +352,14 @@ export default function MailCenter({
       }
       if (sigRes.ok) {
         const sigData = await sigRes.json();
-        if (Array.isArray(sigData)) {
+        if (Array.isArray(sigData) && sigData.length > 0) {
           setSignatures(sigData);
-          if (!selectedSigId && sigData.length > 0) {
-            const def = sigData.find((s) => s.is_default) || sigData[0];
+          const def = sigData.find((s) => s.is_default) || sigData[0];
+          if (!selectedSigId || !sigData.some((s) => s.id === selectedSigId)) {
             setSelectedSigId(def.id);
-            setIncludeSignature(def.auto_insert !== false);
+            if (!userTouchedSignature) {
+              setIncludeSignature(def.auto_insert !== false);
+            }
           }
         }
       }
@@ -442,12 +507,17 @@ export default function MailCenter({
     });
   }
 
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
+  function processUploadedFiles(files: FileList | File[]) {
     Array.from(files).forEach((file) => {
-      if (file.size > 10 * 1024 * 1024) {
-        setStatusBanner({ type: "error", text: `${file.name} exceeds 10 MB limit.` });
+      if (BLOCKED_ATTACH_EXT.test(file.name)) {
+        setStatusBanner({ type: "error", text: `Blocked unsafe file type: ${file.name}` });
+        return;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        setStatusBanner({
+          type: "error",
+          text: `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) exceeds the 4 MB serverless upload cap (with Base64 overhead).`,
+        });
         return;
       }
       const reader = new FileReader();
@@ -458,7 +528,7 @@ export default function MailCenter({
           ...prev.filter((a) => a.filename !== file.name),
           {
             filename: file.name,
-            contentType: file.type || "application/pdf",
+            contentType: file.type || "application/octet-stream",
             base64,
             sizeBytes: file.size,
           },
@@ -466,7 +536,54 @@ export default function MailCenter({
       };
       reader.readAsDataURL(file);
     });
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) processUploadedFiles(e.target.files);
     e.target.value = "";
+  }
+
+  function handleInlineImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !editor) return;
+    if (file.size > 1.5 * 1024 * 1024) {
+      setStatusBanner({ type: "error", text: "Inline image must be under 1.5 MB." });
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result || "");
+      if (src.startsWith("data:image/")) {
+        editor.chain().focus().setImage({ src }).run();
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  async function handleTestSmtp() {
+    if (!canEditSettings || testingSmtp) return;
+    setTestingSmtp(true);
+    setStatusBanner(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ action: "test_smtp" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setStatusBanner({ type: "success", text: data.message || "Zoho SMTP verified successfully." });
+      } else {
+        setStatusBanner({ type: "error", text: data.error || "SMTP verification failed." });
+      }
+      await fetchMailData();
+    } catch {
+      setStatusBanner({ type: "error", text: "Network error while testing SMTP." });
+    } finally {
+      setTestingSmtp(false);
+    }
   }
 
   function downloadAttachment(att: PendingAttachment) {
@@ -487,8 +604,11 @@ export default function MailCenter({
 
   function buildFinalEmailHtml(): string {
     const body = editor?.getHTML() || "";
-    const wrappedBody = `<div style="font-family: ${fontFamily}, Geneva, sans-serif; font-size: ${fontSize}; line-height: 1.5; color: #1f2937;">${body}</div>`;
-    return activeSignatureHtml ? `${wrappedBody}<br/>${activeSignatureHtml}` : wrappedBody;
+    const wrappedBody = `<div style="font-family: ${fontFamily}, Geneva, sans-serif; font-size: ${fontSize}; line-height: ${lineSpacing}; color: #1f2937;">${body}</div>`;
+    const sigNormalized = activeSignatureHtml
+      ? activeSignatureHtml.replace(/src=["']\/assets\//gi, 'src="https://erp.avenautomation.in/assets/')
+      : "";
+    return sigNormalized ? `${wrappedBody}<br/>${sigNormalized}` : wrappedBody;
   }
 
   async function handleSendEmail() {
@@ -745,15 +865,48 @@ export default function MailCenter({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-              zohoStatus?.configured
+          {(() => {
+            const label = !zohoStatus
+              ? "Checking SMTP..."
+              : zohoStatus.enabled === false
+              ? "SMTP Disabled"
+              : !zohoStatus.configured
+              ? "Not Configured"
+              : zohoStatus.lastTestResult === "success"
+              ? "Connected"
+              : zohoStatus.lastTestResult === "failed"
+              ? "Authentication / Connection Failed"
+              : "Configuration Available — Not Tested";
+            const badgeCls =
+              label === "Connected"
                 ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-            }`}
-          >
-            {zohoStatus?.configured ? "Zoho SMTP Ready" : "SMTP Not Configured"}
-          </span>
+                : label === "Configuration Available — Not Tested"
+                ? "bg-sky-500/15 text-sky-400 border-sky-500/30"
+                : label === "Authentication / Connection Failed"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+            return (
+              <span
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}
+                title={zohoStatus?.lastTestError || undefined}
+              >
+                {label}
+              </span>
+            );
+          })()}
+          {canEditSettings && (
+            <button
+              type="button"
+              onClick={handleTestSmtp}
+              disabled={testingSmtp}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+              }`}
+              title="Verify SMTP connection & credentials without sending an email"
+            >
+              {testingSmtp ? "Testing..." : "Test SMTP"}
+            </button>
+          )}
           {canEditSettings && onOpenAdminSettings && (
             <button
               onClick={onOpenAdminSettings}
@@ -791,8 +944,9 @@ export default function MailCenter({
         {(
           [
             { id: "compose", label: "Compose" },
-            { id: "drafts", label: `Drafts (${drafts.length})` },
-            { id: "history", label: `Sent History (${history.length})` },
+            { id: "inbox", label: "Zoho Inbox" },
+            { id: "drafts", label: `Drafts (ERP) (${drafts.length})` },
+            { id: "history", label: `Sent (ERP) (${history.length})` },
             { id: "templates", label: `Templates (${templates.length})` },
             { id: "signatures", label: `Signatures (${signatures.length})` },
           ] as const
@@ -939,6 +1093,7 @@ export default function MailCenter({
                   <select
                     value={includeSignature ? selectedSigId : "__none__"}
                     onChange={(e) => {
+                      setUserTouchedSignature(true);
                       if (e.target.value === "__none__") setIncludeSignature(false);
                       else {
                         setIncludeSignature(true);
@@ -1138,21 +1293,28 @@ export default function MailCenter({
                 </select>
                 <select
                   value={fontSize}
-                  onChange={(e) => setFontSize(e.target.value)}
+                  onChange={(e) => {
+                    const sz = e.target.value;
+                    setFontSize(sz);
+                    (editor?.chain().focus() as any).setMark("textStyle", { fontSize: sz }).run();
+                  }}
                   className={`h-7 px-2 rounded border text-[11px] ${inputCls}`}
-                  title="Default Font Size"
+                  title="Font Size"
                 >
+                  <option value="8pt">8 pt</option>
                   <option value="9pt">9 pt</option>
                   <option value="10pt">10 pt</option>
                   <option value="11pt">11 pt</option>
                   <option value="12pt">12 pt</option>
                   <option value="14pt">14 pt</option>
+                  <option value="18pt">18 pt</option>
+                  <option value="24pt">24 pt</option>
                 </select>
 
-                <button type="button" onClick={() => editor?.chain().focus().toggleBold().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Bold"><Bold className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().toggleItalic().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Italic"><Italic className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().toggleUnderline().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Underline"><UnderlineIcon className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().toggleStrike().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleBold().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("bold") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Bold"><Bold className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleItalic().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("italic") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Italic"><Italic className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleUnderline().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("underline") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Underline"><UnderlineIcon className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleStrike().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("strike") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
 
                 <input
                   type="color"
@@ -1168,24 +1330,42 @@ export default function MailCenter({
                   title="Highlight Color"
                 />
 
-                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("left").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Left"><AlignLeft className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("center").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Center"><AlignCenter className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("right").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Align Right"><AlignRight className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Justify"><AlignJustify className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("left").run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive({ textAlign: "left" }) ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Align Left"><AlignLeft className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("center").run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive({ textAlign: "center" }) ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Align Center"><AlignCenter className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("right").run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive({ textAlign: "right" }) ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Align Right"><AlignRight className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive({ textAlign: "justify" }) ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Justify"><AlignJustify className="w-3.5 h-3.5" /></button>
 
-                <button type="button" onClick={() => editor?.chain().focus().toggleBulletList().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Bullet List"><List className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Numbered List"><ListOrdered className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleBulletList().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("bulletList") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Bullet List"><List className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("orderedList") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Numbered List"><ListOrdered className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().sinkListItem("listItem").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Increase Indent"><Indent className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => editor?.chain().focus().liftListItem("listItem").run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Decrease Indent"><Outdent className="w-3.5 h-3.5" /></button>
+
                 <button
                   type="button"
                   onClick={() => {
-                    const url = window.prompt("Enter link URL:");
+                    const prev = editor?.getAttributes("link")?.href || "";
+                    const url = window.prompt("Enter link URL:", prev);
                     if (url) editor?.chain().focus().setLink({ href: url }).run();
                   }}
-                  className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer"
-                  title="Insert Link"
+                  className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("link") ? "bg-emerald-500/25 text-emerald-400" : ""}`}
+                  title="Insert / Edit Link"
                 >
                   <Link2 className="w-3.5 h-3.5" />
                 </button>
+                {editor?.isActive("link") && (
+                  <button
+                    type="button"
+                    onClick={() => editor?.chain().focus().unsetLink().run()}
+                    className="p-1.5 rounded hover:bg-rose-500/20 text-rose-400 cursor-pointer"
+                    title="Remove Link"
+                  >
+                    <Unlink className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <label className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Insert Inline Image">
+                  <ImagePlus className="w-3.5 h-3.5" />
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleInlineImageUpload} className="hidden" />
+                </label>
                 <button
                   type="button"
                   onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
@@ -1194,9 +1374,74 @@ export default function MailCenter({
                 >
                   <Table2 className="w-3.5 h-3.5" />
                 </button>
+                <button type="button" onClick={() => setShowMoreTools((s) => !s)} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title={showMoreTools ? "Collapse Toolbar" : "Expand More Tools"}>
+                  {showMoreTools ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
                 <button type="button" onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Clear Formatting"><Eraser className="w-3.5 h-3.5" /></button>
                 <button type="button" onClick={() => editor?.chain().focus().undo().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Undo"><Undo2 className="w-3.5 h-3.5" /></button>
                 <button type="button" onClick={() => editor?.chain().focus().redo().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Redo"><Redo2 className="w-3.5 h-3.5" /></button>
+
+                    {showMoreTools && (
+                  <div className="w-full flex flex-wrap items-center gap-1 pt-1.5 mt-1 border-t border-zinc-700/40 relative">
+                    <select
+                      value={lineSpacing}
+                      onChange={(e) => {
+                        setLineSpacing(e.target.value);
+                      }}
+                      className={`h-7 px-1.5 rounded border text-[11px] ${inputCls}`}
+                      title="Line Spacing"
+                    >
+                      <option value="1.15">1.15x</option>
+                      <option value="1.3">1.3x</option>
+                      <option value="1.5">1.5x</option>
+                      <option value="1.75">1.75x</option>
+                      <option value="2.0">2.0x</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => (editor?.chain().focus() as any).setMark("textStyle", { fontSize: "8pt" }).run()}
+                      className="px-1.5 py-1 rounded hover:bg-emerald-500/20 text-[10px] font-bold cursor-pointer"
+                      title="Subscript / Small"
+                    >
+                      X₂
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (editor?.chain().focus() as any).setMark("textStyle", { fontSize: "9pt" }).run()}
+                      className="px-1.5 py-1 rounded hover:bg-emerald-500/20 text-[10px] font-bold cursor-pointer"
+                      title="Superscript / Note"
+                    >
+                      X²
+                    </button>
+                    <button type="button" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className={`p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer ${editor?.isActive("blockquote") ? "bg-emerald-500/25 text-emerald-400" : ""}`} title="Blockquote"><Quote className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => editor?.chain().focus().setHorizontalRule().run()} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Insert Horizontal Line"><Minus className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => setShowEmojiPicker((p) => !p)} className="p-1.5 rounded hover:bg-emerald-500/20 cursor-pointer" title="Insert Emoji"><Smile className="w-3.5 h-3.5" /></button>
+                    {showEmojiPicker && (
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded border text-sm ${isDark ? "bg-zinc-950 border-zinc-700" : "bg-white border-slate-300"}`}>
+                        {["👍", "🙏", "✅", "📄", "📎", "🤝", "📞", "📧", "⚙️", "🏭"].map((em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            onClick={() => {
+                              editor?.chain().focus().insertContent(em).run();
+                              setShowEmojiPicker(false);
+                            }}
+                            className="hover:scale-110 transition-transform cursor-pointer px-0.5"
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {editor?.isActive("table") && (
+                      <>
+                        <button type="button" onClick={() => editor?.chain().focus().addRowAfter().run()} className="px-2 py-0.5 rounded text-[10px] border border-zinc-700 hover:bg-zinc-800 cursor-pointer">+ Row</button>
+                        <button type="button" onClick={() => editor?.chain().focus().addColumnAfter().run()} className="px-2 py-0.5 rounded text-[10px] border border-zinc-700 hover:bg-zinc-800 cursor-pointer">+ Col</button>
+                        <button type="button" onClick={() => editor?.chain().focus().deleteTable().run()} className="px-2 py-0.5 rounded text-[10px] border border-rose-700 text-rose-400 hover:bg-rose-950 cursor-pointer">Delete Table</button>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {canUseAi && aiEnabled && (
                   <div className="flex flex-wrap items-center gap-1 ml-auto pl-2 border-l border-zinc-700/50">
@@ -1247,17 +1492,62 @@ export default function MailCenter({
               {/* Separated Non-AI-Touched Signature Preview Block */}
               {includeSignature && activeSignatureHtml && (
                 <div className="bg-white border-t border-slate-200 px-4 py-3 text-zinc-900">
-                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 flex flex-wrap items-center justify-between gap-2">
                     <span>Email Signature ({activeSignature?.name})</span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("signatures")}
-                      className="text-indigo-600 hover:underline cursor-pointer normal-case"
-                    >
-                      Manage Signatures
-                    </button>
+                    <div className="flex items-center gap-3 normal-case">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!editingCurrentSig && customSigOverrideHtml === null) {
+                            setCustomSigOverrideHtml(activeSignatureHtml);
+                          }
+                          setEditingCurrentSig((v) => !v);
+                        }}
+                        className="text-sky-600 hover:underline cursor-pointer"
+                      >
+                        {editingCurrentSig ? "Done Editing" : "Edit for This Email"}
+                      </button>
+                      {customSigOverrideHtml !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomSigOverrideHtml(null);
+                            setEditingCurrentSig(false);
+                          }}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Reset Signature
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserTouchedSignature(true);
+                          setIncludeSignature(false);
+                        }}
+                        className="text-rose-600 hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("signatures")}
+                        className="text-indigo-600 hover:underline cursor-pointer"
+                      >
+                        Manage Signatures
+                      </button>
+                    </div>
                   </div>
-                  <div dangerouslySetInnerHTML={{ __html: activeSignatureHtml }} />
+                  {editingCurrentSig ? (
+                    <textarea
+                      rows={5}
+                      value={customSigOverrideHtml ?? activeSignatureHtml}
+                      onChange={(e) => setCustomSigOverrideHtml(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded text-xs font-mono text-zinc-900 bg-slate-50"
+                    />
+                  ) : (
+                    <div dangerouslySetInnerHTML={{ __html: activeSignatureHtml }} />
+                  )}
                 </div>
               )}
             </div>
@@ -1300,8 +1590,26 @@ export default function MailCenter({
               </div>
             )}
 
-            {/* Enhanced Attachments Toolbar */}
-            <div className={`p-3.5 rounded-xl border space-y-3 ${isDark ? "border-zinc-800 bg-zinc-900/50" : "border-slate-200 bg-slate-50"}`}>
+            {/* Enhanced Attachments Toolbar (Drag & Drop + ERP PDFs + Business Files) */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOverAttach(true);
+              }}
+              onDragLeave={() => setDragOverAttach(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverAttach(false);
+                if (e.dataTransfer?.files?.length) processUploadedFiles(e.dataTransfer.files);
+              }}
+              className={`p-3.5 rounded-xl border space-y-3 transition-colors ${
+                dragOverAttach
+                  ? "border-emerald-500 bg-emerald-500/10"
+                  : isDark
+                  ? "border-zinc-800 bg-zinc-900/50"
+                  : "border-slate-200 bg-slate-50"
+              }`}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold flex items-center gap-1.5 mr-1">
                   <Paperclip className="w-3.5 h-3.5 text-emerald-500" /> Attach ERP Document:
@@ -1334,10 +1642,10 @@ export default function MailCenter({
                       : "border-slate-300 bg-white hover:bg-slate-100 text-zinc-800"
                   }`}
                 >
-                  <Upload className="w-3 h-3" /> Upload File
+                  <Upload className="w-3 h-3" /> Upload File (PDF, Office, CSV, Img)
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg"
+                    accept={ALLOWED_ATTACH_ACCEPT}
                     multiple
                     onChange={handleFileUpload}
                     className="hidden"
@@ -1381,6 +1689,48 @@ export default function MailCenter({
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ZOHO INBOX TAB (Honest Free-Plan Capability View) */}
+      {activeTab === "inbox" && (
+        <div className={`${cardCls} rounded-xl p-6 space-y-4`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center">
+                <Inbox className="w-5 h-5 text-sky-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">Zoho Mail Inbox Integration</h3>
+                <p className="text-xs opacity-70">
+                  Account: {zohoStatus?.senderEmail || "sales@avenautomation.in"} • Plan Compatibility Check
+                </p>
+              </div>
+            </div>
+            <a
+              href="https://mail.zoho.in"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Open Zoho Webmail
+            </a>
+          </div>
+
+          <div className={`p-4 rounded-lg border text-xs space-y-2 ${isDark ? "bg-zinc-950/60 border-zinc-800" : "bg-slate-50 border-slate-200"}`}>
+            <div className="font-bold text-amber-400">
+              {zohoStatus?.oauthConfigured
+                ? "Zoho OAuth 2.0 Client Configured — Authorization Pending"
+                : "Zoho Mail Free Plan — IMAP/POP Blocked & OAuth Not Connected"}
+            </div>
+            <p className="opacity-80 leading-relaxed">
+              Zoho Mail&apos;s Forever Free Plan restricts third-party IMAP/POP client access, so this ERP will never display simulated or dummy incoming emails.
+              To synchronize live Inbox/Sent messages inside the ERP, configure a Zoho Mail OAuth 2.0 application (<code>ZOHO_OAUTH_CLIENT_ID</code> and <code>ZOHO_OAUTH_CLIENT_SECRET</code>) or use Zoho Webmail directly via the button above.
+            </p>
+            <div className="text-[11px] opacity-70">
+              ERP-composed drafts and sent emails remain safely stored under <strong>Drafts (ERP)</strong> and <strong>Sent (ERP)</strong>.
             </div>
           </div>
         </div>

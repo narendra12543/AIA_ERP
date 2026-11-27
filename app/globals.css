@@ -5,6 +5,105 @@
 :root {
   --background: #09090b;
   --foreground: #fafafa;
+  --card: #111216;
+  --card-foreground: #fafafa;
+  --popover: #111216;
+  --popover-foreground: #fafafa;
+  --primary: #f59e0b;
+  --primary-foreground: #09090b;
+  --secondary: #18181b;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #18181b;
+  --accent-foreground: #fafafa;
+  --destructive: #e11d48;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #f59e0b;
+}
+
+@keyframes avenFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes avenPopoverIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes avenFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes avenSlideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.aven-fade-up {
+  animation: avenFadeUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.aven-popover-anim {
+  animation: avenPopoverIn 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.aven-fade-in {
+  animation: avenFadeIn 200ms ease-out both;
+}
+
+.aven-slide-in-left {
+  animation: avenSlideInLeft 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Preserve dark/light theme visual consistency on browser autofill */
+.aven-autofill-dark:-webkit-autofill,
+.aven-autofill-dark:-webkit-autofill:hover,
+.aven-autofill-dark:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fafafa !important;
+  -webkit-box-shadow: 0 0 0px 1000px #09090b inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.aven-autofill-light:-webkit-autofill,
+.aven-autofill-light:-webkit-autofill:hover,
+.aven-autofill-light:-webkit-autofill:focus {
+  -webkit-text-fill-color: #18181b !important;
+  -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aven-fade-up,
+  .aven-popover-anim,
+  .aven-fade-in,
+  .aven-slide-in-left {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 body {
