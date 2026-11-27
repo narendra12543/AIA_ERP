@@ -780,7 +780,13 @@ export default function Home() {
       <div
         id="screen_app_root"
         className={`min-h-screen flex ${
-          theme === "dark" ? "bg-[#101113] text-[#F4F4F5]" : "bg-[#F7F8FA] text-[#18181B]"
+          effectiveView === "quotation"
+            ? theme === "dark"
+              ? "bg-[#09090b] text-zinc-100"
+              : "bg-slate-50 text-zinc-900"
+            : theme === "dark"
+            ? "bg-[#101113] text-[#F4F4F5]"
+            : "bg-[#F7F8FA] text-[#18181B]"
         }`}
       >
         {/* Left Sidebar */}

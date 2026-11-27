@@ -165,6 +165,9 @@ export default function FinanceOperationsView({
   const [directExpAmount, setDirectExpAmount] = useState("");
   const [directExpCatName, setDirectExpCatName] = useState("Material");
   const [directExpDate, setDirectExpDate] = useState(getCurrentBusinessDate());
+  const [submittingDirectExp, setSubmittingDirectExp] = useState(false);
+  const submittingDirectExpRef = useRef(false);
+  const [directExpError, setDirectExpError] = useState<string | null>(null);
 
   // Accounts & Ledger
   const [newAccName, setNewAccName] = useState("");
@@ -704,8 +707,26 @@ export default function FinanceOperationsView({
 
   const handleDirectExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!directExpTitle.trim() || !directExpAmount) return;
+    if (submittingDirectExpRef.current || submittingDirectExp) return;
+    setDirectExpError(null);
     setNotice(null);
+
+    if (!directExpTitle.trim()) {
+      const msg = "Please enter a Direct Company Expense Purpose.";
+      setDirectExpError(msg);
+      setNotice({ type: "err", text: msg });
+      return;
+    }
+    const amt = Number(directExpAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      const msg = "Please enter a valid expense amount greater than 0.";
+      setDirectExpError(msg);
+      setNotice({ type: "err", text: msg });
+      return;
+    }
+
+    submittingDirectExpRef.current = true;
+    setSubmittingDirectExp(true);
     try {
       const res = await fetch("/api/expenses", {
         method: "POST",
@@ -713,18 +734,20 @@ export default function FinanceOperationsView({
         body: JSON.stringify({
           description: directExpTitle.trim(),
           paid_to: directExpPaidTo.trim() || "Company Vendor",
-          amount: Number(directExpAmount),
+          amount: amt,
           category_name: directExpCatName || "Other",
-          expense_date: directExpDate,
+          expense_date: directExpDate || getCurrentBusinessDate(),
           payment_mode: "Bank Transfer",
           paid_by: "Company",
           ownerDirectPost: currentUser?.role === "Admin",
           isCompanyDirect: true,
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setNotice({ type: "err", text: json.error || "Failed to add expense." });
+        const msg = json.error || "Failed to add expense.";
+        setDirectExpError(msg);
+        setNotice({ type: "err", text: msg });
         return;
       }
       setNotice({ type: "ok", text: "Company expense recorded." });
@@ -733,7 +756,12 @@ export default function FinanceOperationsView({
       setDirectExpAmount("");
       await loadFinanceData();
     } catch {
-      setNotice({ type: "err", text: "Failed to record company expense." });
+      const msg = "Failed to record company expense.";
+      setDirectExpError(msg);
+      setNotice({ type: "err", text: msg });
+    } finally {
+      submittingDirectExpRef.current = false;
+      setSubmittingDirectExp(false);
     }
   };
 
@@ -1382,10 +1410,19 @@ export default function FinanceOperationsView({
               <label className={`block text-[12px] font-medium mb-1 ${textMuted}`}>Amount (₹) *</label>
               <input type="number" step="0.01" value={directExpAmount} onChange={(e) => setDirectExpAmount(e.target.value)} className={`w-full h-9 px-2.5 rounded-md border text-[13px] tabular-nums ${inputCls}`} />
             </div>
-            <button type="submit" className="h-9 px-3.5 rounded-md bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[13px] font-medium cursor-pointer flex items-center justify-center gap-1">
+            <button
+              type="submit"
+              disabled={submittingDirectExp}
+              className="h-9 px-3.5 rounded-md bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-zinc-950 text-[13px] font-medium cursor-pointer flex items-center justify-center gap-1"
+            >
               <Plus className="w-4 h-4" />
-              <span>Add Expense</span>
+              <span>{submittingDirectExp ? "Saving..." : "Add Expense"}</span>
             </button>
+            {directExpError && (
+              <div className="sm:col-span-6 text-[12px] text-rose-500 font-medium">
+                {directExpError}
+              </div>
+            )}
           </form>
 
           <div className={`p-4 rounded-lg border ${cardBg} space-y-3`}>
