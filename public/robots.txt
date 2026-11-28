@@ -1,4 +1,7 @@
-# AVEN INDUSTRIAL AUTOMATION ERP — ROBOTS EXCLUSION STANDARD
-# Strictly disallow all search engines from indexing private ERP records, quotations, and invoices
+# AVEN INDUSTRIAL AUTOMATION ERP — ROBOTS CRAWL POLICY
+# Allow compliant crawlers to fetch public entry shell so noindex/nofollow directives
+# are processed for permanent search engine removal, while blocking API endpoints.
+# Private ERP data remains protected by server-side authentication and RBAC.
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /api/
