@@ -4,28 +4,19 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
-  ExternalLink,
-  FolderPlus,
   Forward,
   Inbox,
   Link2,
   Mail,
   MailOpen,
-  Menu,
   Paperclip,
-  RefreshCw,
   Reply,
   ReplyAll,
-  Search,
-  Send,
   Star,
   Trash2,
-  UserCheck,
-  X,
 } from "lucide-react";
 
 function getTabHeaders(): Record<string, string> {
@@ -42,15 +33,35 @@ function getTabHeaders(): Record<string, string> {
   return headers;
 }
 
+function decodeHtmlEntities(input?: string): string {
+  if (!input) return "";
+  return String(input)
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 interface ZohoMailboxWorkspaceProps {
   theme: "dark" | "light";
   isAdmin: boolean;
   mailboxes: any[];
   activeMailbox: any | null;
-  onSelectMailbox: (mbx: any) => void;
+  folders: any[];
+  activeFolderId: string;
+  loadingFolders: boolean;
+  searchQuery: string;
+  clientMode: boolean;
+  refreshNonce: number;
+  onRefreshFolders: () => void;
   onOpenAdminSettings?: () => void;
-  clientModeTrigger?: number;
-  searchTrigger?: number;
   onComposeAction: (opts: {
     mode: "new" | "reply" | "replyAll" | "forward";
     to?: string;
@@ -67,123 +78,76 @@ export default function ZohoMailboxWorkspace({
   isAdmin,
   mailboxes,
   activeMailbox,
-  onSelectMailbox,
+  folders,
+  activeFolderId,
+  loadingFolders,
+  searchQuery,
+  clientMode,
+  refreshNonce,
+  onRefreshFolders,
   onOpenAdminSettings,
-  clientModeTrigger,
-  searchTrigger,
   onComposeAction,
 }: ZohoMailboxWorkspaceProps) {
   const isDark = theme === "dark";
-  const [folders, setFolders] = useState<any[]>([]);
-  const [activeFolderId, setActiveFolderId] = useState<string>("");
   const [messages, setMessages] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeMessage, setActiveMessage] = useState<any | null>(null);
   const [allowRemoteImages, setAllowRemoteImages] = useState(false);
 
-  const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [loadingFolders, setLoadingFolders] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingBody, setLoadingBody] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [mobileFoldersOpen, setMobileFoldersOpen] = useState(false);
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [showNewFolder, setShowNewFolder] = useState(false);
 
   // Client Email History integration
-  const [clientMode, setClientMode] = useState(false);
   const [clientEmailInput, setClientEmailInput] = useState("");
-  const [clientEmails, setClientEmails] = useState<{ incoming: any[]; outgoing: any[] }>({ incoming: [], outgoing: [] });
+  const [clientEmails, setClientEmails] = useState<{ incoming: any[]; outgoing: any[] }>({
+    incoming: [],
+    outgoing: [],
+  });
 
-  // Mailbox-scoped cache & AbortController for fast, race-free switching
-  const folderCacheRef = useRef<Map<string, any[]>>(new Map());
+  // Mailbox-scoped cache & AbortController for race-free switching
   const messageCacheRef = useRef<Map<string, any[]>>(new Map());
-  const abortRef = useRef<AbortController | null>(null);
+  const listAbortRef = useRef<AbortController | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const savedScrollTopRef = useRef<number>(0);
 
   useEffect(() => {
-    if (clientModeTrigger && clientModeTrigger > 0) {
-      setClientMode((v) => !v);
-    }
-  }, [clientModeTrigger]);
-
-  useEffect(() => {
-    if (searchTrigger && searchTrigger > 0) {
-      setMobileSearchOpen((v) => !v);
-    }
-  }, [searchTrigger]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 350);
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setPage(0);
+    }, 300);
     return () => clearTimeout(t);
-  }, [searchInput]);
+  }, [searchQuery]);
 
-  // Reset reading panel & stale requests immediately on mailbox switch
-  const loadFolders = useCallback(async (mailboxId: string) => {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
+  // Reset selected message & selections when switching mailbox or folder
+  useEffect(() => {
     setActiveMessage(null);
     setSelectedIds(new Set());
     setErrorMsg(null);
     setPage(0);
-
-    const cached = folderCacheRef.current.get(mailboxId);
-    if (cached) {
-      setFolders(cached);
-      const inbox = cached.find((f) => String(f.folderType || f.folderName).toLowerCase() === "inbox") || cached[0];
-      if (inbox) setActiveFolderId(inbox.folderId);
-    } else {
-      setFolders([]);
-      setActiveFolderId("");
-    }
-
-    setLoadingFolders(true);
-    try {
-      const res = await fetch(`/api/mail/folders?mailboxId=${encodeURIComponent(mailboxId)}`, {
-        signal: ctrl.signal,
-        cache: "no-store",
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setErrorMsg(json.error || "Failed to load mailbox folders.");
-        return;
-      }
-      const list = Array.isArray(json.folders) ? json.folders : [];
-      folderCacheRef.current.set(mailboxId, list);
-      setFolders(list);
-      const inbox = list.find((f: any) => String(f.folderType || f.folderName).toLowerCase() === "inbox") || list[0];
-      if (inbox) setActiveFolderId(inbox.folderId);
-    } catch (err: any) {
-      if (err?.name !== "AbortError") setErrorMsg("Network error loading folders.");
-    } finally {
-      setLoadingFolders(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeMailbox?.id) {
-      loadFolders(activeMailbox.id);
-    }
-    return () => abortRef.current?.abort();
-  }, [activeMailbox?.id, loadFolders]);
+    savedScrollTopRef.current = 0;
+  }, [activeMailbox?.id, activeFolderId]);
 
   const loadMessages = useCallback(async () => {
     if (!activeMailbox?.id || !activeFolderId) return;
-    const cacheKey = `${activeMailbox.id}:${activeFolderId}:${page}:${debouncedSearch}`;
+    listAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    listAbortRef.current = ctrl;
+
+    const targetMailboxId = activeMailbox.id;
+    const targetFolderId = activeFolderId;
+    const cacheKey = `${targetMailboxId}:${targetFolderId}:${page}:${debouncedSearch}`;
     const cached = messageCacheRef.current.get(cacheKey);
     if (cached) setMessages(cached);
 
     setLoadingMessages(true);
     setErrorMsg(null);
-    const ctrl = new AbortController();
     try {
       const qs = new URLSearchParams({
-        mailboxId: activeMailbox.id,
-        folderId: activeFolderId,
+        mailboxId: targetMailboxId,
+        folderId: targetFolderId,
         start: String(page * 25),
         limit: "25",
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
@@ -191,8 +155,10 @@ export default function ZohoMailboxWorkspace({
       const res = await fetch(`/api/mail/messages?${qs.toString()}`, {
         signal: ctrl.signal,
         cache: "no-store",
+        headers: getTabHeaders(),
       });
       const json = await res.json();
+      if (ctrl.signal.aborted) return;
       if (!res.ok) {
         setErrorMsg(json.error || "Failed to load messages.");
         return;
@@ -203,16 +169,20 @@ export default function ZohoMailboxWorkspace({
     } catch (err: any) {
       if (err?.name !== "AbortError") setErrorMsg("Failed to fetch messages.");
     } finally {
-      setLoadingMessages(false);
+      if (!ctrl.signal.aborted) setLoadingMessages(false);
     }
   }, [activeMailbox?.id, activeFolderId, page, debouncedSearch]);
 
   useEffect(() => {
     loadMessages();
-  }, [loadMessages]);
+    return () => listAbortRef.current?.abort();
+  }, [loadMessages, refreshNonce]);
 
   const openMessage = async (msg: any, remoteImgs: boolean = false) => {
     if (!activeMailbox?.id) return;
+    if (listScrollRef.current) {
+      savedScrollTopRef.current = listScrollRef.current.scrollTop;
+    }
     setLoadingBody(true);
     setAllowRemoteImages(remoteImgs);
     try {
@@ -222,7 +192,10 @@ export default function ZohoMailboxWorkspace({
         messageId: String(msg.messageId),
         allowRemoteImages: remoteImgs ? "1" : "0",
       });
-      const res = await fetch(`/api/mail/messages?${qs.toString()}`, { cache: "no-store" });
+      const res = await fetch(`/api/mail/messages?${qs.toString()}`, {
+        cache: "no-store",
+        headers: getTabHeaders(),
+      });
       const json = await res.json();
       if (!res.ok) {
         setErrorMsg(json.error || "Failed to load email content.");
@@ -232,7 +205,7 @@ export default function ZohoMailboxWorkspace({
       if (!msg.isRead) {
         await fetch("/api/mail/messages", {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getTabHeaders() },
           body: JSON.stringify({
             mailboxId: activeMailbox.id,
             folderId: msg.folderId || activeFolderId,
@@ -251,6 +224,15 @@ export default function ZohoMailboxWorkspace({
     }
   };
 
+  const handleBackToList = () => {
+    setActiveMessage(null);
+    setTimeout(() => {
+      if (listScrollRef.current) {
+        listScrollRef.current.scrollTop = savedScrollTopRef.current;
+      }
+    }, 0);
+  };
+
   const runOperation = async (operation: string, ids: string[]) => {
     if (!activeMailbox?.id || ids.length === 0) return;
     if (operation === "trash" && !window.confirm(`Move ${ids.length} message(s) to Trash?`)) return;
@@ -264,7 +246,7 @@ export default function ZohoMailboxWorkspace({
 
     const res = await fetch("/api/mail/messages", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getTabHeaders() },
       body: JSON.stringify({
         mailboxId: activeMailbox.id,
         folderId: activeFolderId,
@@ -283,25 +265,39 @@ export default function ZohoMailboxWorkspace({
     }
     setSelectedIds(new Set());
     await loadMessages();
+    onRefreshFolders();
   };
 
   const handleLoadClientEmails = async () => {
     if (!clientEmailInput.trim()) return;
-    const res = await fetch(`/api/mail/client-history?clientEmail=${encodeURIComponent(clientEmailInput.trim())}`);
+    const res = await fetch(
+      `/api/mail/client-history?clientEmail=${encodeURIComponent(clientEmailInput.trim())}`,
+      { headers: getTabHeaders() }
+    );
     if (res.ok) {
       const json = await res.json();
       setClientEmails({ incoming: json.incoming || [], outgoing: json.outgoing || [] });
     }
   };
 
-  const cardCls = isDark ? "bg-[#17181B] border-[#2A2C30] text-[#F4F4F5]" : "bg-white border-[#E2E4E8] text-[#18181B]";
-  const subCls = isDark ? "bg-[#1D1F23] border-[#2A2C30]" : "bg-[#F7F8FA] border-[#E2E4E8]";
-  const inputCls = isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900";
-  const mutedCls = isDark ? "text-[#A1A1AA]" : "text-[#71717A]";
+  const activeFolderObj = folders.find((f) => f.folderId === activeFolderId);
+  const activeFolderName = activeFolderObj?.folderName || "Inbox";
+
+  const cardCls = isDark
+    ? "bg-[#111113] border-[#27272A] text-[#F4F4F5]"
+    : "bg-white border-slate-200 text-[#18181B]";
+  const subCls = isDark
+    ? "bg-[#18181B] border-[#27272A]"
+    : "bg-slate-50 border-slate-200";
+  const inputCls = isDark
+    ? "bg-[#09090B] border-zinc-700 text-white"
+    : "bg-white border-slate-300 text-zinc-900";
+  const mutedCls = isDark ? "text-[#A1A1AA]" : "text-slate-500";
+  const dividerCls = isDark ? "divide-[#27272A]/70" : "divide-slate-200";
 
   if (mailboxes.length === 0) {
     return (
-      <div className={`p-8 rounded-xl border text-center space-y-2 ${cardCls}`}>
+      <div className={`p-8 rounded-lg border text-center space-y-2 ${cardCls}`}>
         <Mail className="w-8 h-8 mx-auto text-zinc-500" />
         <h3 className="text-sm font-semibold">No Mailbox Assigned</h3>
         <p className={`text-xs max-w-md mx-auto ${mutedCls}`}>
@@ -312,134 +308,46 @@ export default function ZohoMailboxWorkspace({
   }
 
   return (
-    <div className="space-y-2.5 min-w-0">
-      {/* Compact Zoho-Style Toolbar (desktop full toolbar; mobile shows only Zoho folders & search when open) */}
-      <div className={`px-2.5 py-2 rounded-xl border space-y-2 ${!mobileSearchOpen ? "hidden lg:block" : ""} ${cardCls}`}>
-        <div className="hidden lg:flex items-center justify-between gap-1.5 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <select
-              aria-label="Select Authorized Mailbox"
-              value={activeMailbox?.id || ""}
-              onChange={(e) => {
-                const found = mailboxes.find((m) => m.id === e.target.value);
-                if (found) onSelectMailbox(found);
-              }}
-              className={`max-w-[230px] pl-2 pr-6 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer truncate ${inputCls}`}
-            >
-              {mailboxes.map((m) => {
-                const shortName = String(m.email_address || "").split("@")[0];
-                return (
-                  <option key={m.id} value={m.id}>
-                    {shortName}@avenautomation.in
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <div className="relative w-56 md:w-64">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => {
-                  setSearchInput(e.target.value);
-                  setPage(0);
-                }}
-                placeholder="Search mail..."
-                className={`w-full pl-8 pr-2.5 py-1.5 rounded-lg border text-xs ${inputCls}`}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setClientMode((v) => !v)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium cursor-pointer ${
-                clientMode ? "border-amber-500 text-amber-400 bg-amber-500/10" : subCls
-              }`}
-              title="Client Emails"
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>Client Emails</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => activeMailbox?.id && loadFolders(activeMailbox.id)}
-              className={`p-1.5 rounded-lg border cursor-pointer ${subCls}`}
-              title="Refresh mailbox"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingFolders || loadingMessages ? "animate-spin" : ""}`} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onComposeAction({ mode: "new" })}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-semibold cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Compose</span>
-            </button>
-          </div>
-        </div>
-
-        {mobileSearchOpen && (
-          <div className="lg:hidden relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => {
-                setSearchInput(e.target.value);
-                setPage(0);
-              }}
-              placeholder="Search sender, subject, content..."
-              className={`w-full pl-8 pr-2.5 py-1.5 rounded-lg border text-xs ${inputCls}`}
-            />
-          </div>
-        )}
-      </div>
-
+    <div className="flex flex-col flex-1 min-w-0 min-h-0 space-y-2">
       {errorMsg && (
-        <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs flex items-center gap-2">
+        <div className="px-3 py-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {clientMode && (
-        <div className={`p-4 rounded-xl border space-y-3 ${cardCls}`}>
+        <div className={`p-3 rounded-lg border space-y-2.5 ${cardCls}`}>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="email"
               value={clientEmailInput}
               onChange={(e) => setClientEmailInput(e.target.value)}
               placeholder="Enter exact client email (e.g. sales@client.com)..."
-              className={`flex-1 px-3 py-2 rounded-lg border text-xs ${inputCls}`}
+              className={`flex-1 px-3 py-1.5 rounded-lg border text-xs ${inputCls}`}
             />
             <button
               type="button"
               onClick={handleLoadClientEmails}
-              className="px-4 py-2 rounded-lg bg-amber-500 text-zinc-950 text-xs font-semibold cursor-pointer"
+              className="px-3.5 py-1.5 rounded-lg bg-amber-500 text-zinc-950 text-xs font-semibold cursor-pointer"
             >
               Find Client Correspondence
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className={`p-3 rounded-lg border ${subCls}`}>
-              <div className="font-semibold mb-2">Incoming ({clientEmails.incoming.length})</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+            <div className={`p-2.5 rounded-lg border ${subCls}`}>
+              <div className="font-semibold mb-1.5">Incoming ({clientEmails.incoming.length})</div>
               {clientEmails.incoming.map((e, i) => (
-                <div key={i} className="py-1.5 border-b border-zinc-800/40 last:border-0">
+                <div key={i} className="py-1 border-b border-zinc-800/40 last:border-0">
                   <div className="font-medium truncate">{e.subject}</div>
                   <div className={`text-[10px] ${mutedCls}`}>{e.from_address} &bull; {e.mailbox_id}</div>
                 </div>
               ))}
             </div>
-            <div className={`p-3 rounded-lg border ${subCls}`}>
-              <div className="font-semibold mb-2">Outgoing ({clientEmails.outgoing.length})</div>
+            <div className={`p-2.5 rounded-lg border ${subCls}`}>
+              <div className="font-semibold mb-1.5">Outgoing ({clientEmails.outgoing.length})</div>
               {clientEmails.outgoing.map((e, i) => (
-                <div key={i} className="py-1.5 border-b border-zinc-800/40 last:border-0">
+                <div key={i} className="py-1 border-b border-zinc-800/40 last:border-0">
                   <div className="font-medium truncate">{e.subject}</div>
                   <div className={`text-[10px] ${mutedCls}`}>{e.from_email} &rarr; {e.to_emails}</div>
                 </div>
@@ -451,7 +359,7 @@ export default function ZohoMailboxWorkspace({
 
       {/* Disconnected State */}
       {activeMailbox && activeMailbox.connection_status !== "Connected" ? (
-        <div className={`p-8 rounded-xl border text-center space-y-3 ${cardCls}`}>
+        <div className={`p-8 rounded-lg border text-center space-y-3 ${cardCls}`}>
           <Link2 className="w-8 h-8 mx-auto text-amber-400" />
           <h3 className="text-sm font-semibold">{activeMailbox.email_address} is {activeMailbox.connection_status}</h3>
           <p className={`text-xs max-w-md mx-auto ${mutedCls}`}>
@@ -470,246 +378,151 @@ export default function ZohoMailboxWorkspace({
           )}
         </div>
       ) : (
-        /* Responsive Three-Panel Workspace (sits cleanly beside ERP main sidebar) */
-        <div className="flex flex-col lg:flex-row gap-2.5 min-h-[520px] min-w-0">
-          {/* Mobile Slide-Over Zoho Drawer */}
-          {mobileFoldersOpen && (
-            <div className="fixed inset-0 z-50 lg:hidden flex">
-              <div
-                className="fixed inset-0 bg-black/60 backdrop-blur-xs"
-                onClick={() => setMobileFoldersOpen(false)}
-              />
-              <div className={`relative z-10 w-64 max-w-[82vw] h-full p-3 border-r flex flex-col gap-3 overflow-y-auto ${cardCls}`}>
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-800/40">
-                  <span className="text-xs font-bold flex items-center gap-1.5">
-                    <Mail className="w-4 h-4 text-amber-400" /> Mailboxes &amp; Folders
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setMobileFoldersOpen(false)}
-                    className="p-1 rounded hover:bg-zinc-800 cursor-pointer"
-                    aria-label="Close drawer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileFoldersOpen(false);
-                    onComposeAction({ mode: "new" });
-                  }}
-                  className="w-full py-2 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" /> New Mail
-                </button>
-
-                <div className="space-y-1">
-                  <div className={`text-[10px] font-bold uppercase tracking-wider px-1 ${mutedCls}`}>Accounts</div>
-                  {mailboxes.map((m) => {
-                    const shortName = String(m.email_address || "").split("@")[0];
-                    const isActive = activeMailbox?.id === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => {
-                          onSelectMailbox(m);
-                          setMobileFoldersOpen(false);
-                        }}
-                        className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between cursor-pointer ${
-                          isActive ? "bg-emerald-500/15 text-emerald-400 font-semibold" : `hover:bg-zinc-800/40 ${mutedCls}`
-                        }`}
-                      >
-                        <span className="truncate">{shortName}@</span>
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 ${
-                            m.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"
-                          }`}
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="space-y-1">
-                  <div className={`text-[10px] font-bold uppercase tracking-wider px-1 ${mutedCls}`}>Folders</div>
-                  {folders.map((f) => (
-                    <button
-                      key={f.folderId}
-                      type="button"
-                      onClick={() => {
-                        setActiveFolderId(f.folderId);
-                        setActiveMessage(null);
-                        setPage(0);
-                        setMobileFoldersOpen(false);
-                      }}
-                      className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between cursor-pointer ${
-                        activeFolderId === f.folderId ? "bg-amber-500/15 text-amber-400 font-semibold" : `hover:bg-zinc-800/40 ${mutedCls}`
-                      }`}
-                    >
-                      <span className="truncate">{f.folderName}</span>
-                      {f.unreadCount > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold">
-                          {f.unreadCount}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Panel 1: Desktop Folder Rail (beside ERP sidebar) */}
-          <div className={`hidden lg:flex lg:flex-col lg:w-48 xl:w-52 shrink-0 p-2.5 rounded-xl border space-y-1 ${cardCls}`}>
-            <div className="flex items-center justify-between px-2 pb-1.5">
-              <span className={`text-[10px] font-bold uppercase tracking-wider ${mutedCls}`}>Folders</span>
-              {activeMailbox?.capabilities?.manage_folders && (
-                <button
-                  type="button"
-                  onClick={() => setShowNewFolder((v) => !v)}
-                  className="p-1 text-zinc-400 hover:text-amber-400 cursor-pointer"
-                  title="New folder"
-                >
-                  <FolderPlus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {showNewFolder && (
-              <div className="p-1.5 space-y-1">
-                <input
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="Folder name"
-                  className={`w-full px-2 py-1 rounded border text-xs ${inputCls}`}
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!newFolderName.trim()) return;
-                    await fetch("/api/mail/folders", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ mailboxId: activeMailbox.id, folderName: newFolderName.trim() }),
-                    });
-                    setNewFolderName("");
-                    setShowNewFolder(false);
-                    loadFolders(activeMailbox.id);
-                  }}
-                  className="w-full py-1 rounded bg-amber-500 text-zinc-950 text-[11px] font-semibold cursor-pointer"
-                >
-                  Create
-                </button>
-              </div>
-            )}
-
-            {folders.map((f) => (
-              <button
-                key={f.folderId}
-                type="button"
-                onClick={() => {
-                  setActiveFolderId(f.folderId);
-                  setActiveMessage(null);
-                  setPage(0);
-                  setMobileFoldersOpen(false);
-                }}
-                className={`w-full px-2.5 py-2 rounded-lg text-xs flex items-center justify-between cursor-pointer transition ${
-                  activeFolderId === f.folderId ? "bg-amber-500/15 text-amber-400 font-semibold" : `hover:bg-zinc-800/40 ${mutedCls}`
-                }`}
-              >
-                <span className="truncate">{f.folderName}</span>
-                {f.unreadCount > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold">
-                    {f.unreadCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Panel 2: Compact Message List */}
-          <div className={`${activeMessage ? "hidden lg:flex" : "flex"} w-full lg:w-[330px] xl:w-[370px] shrink-0 flex-col rounded-xl border overflow-hidden ${cardCls}`}>
-            {/* Bulk Toolbar */}
-            <div className={`px-2.5 py-1.5 border-b flex items-center justify-between gap-2 text-xs ${subCls}`}>
-              <div className="flex items-center gap-2">
+        /* Split Workspace: Email List | Email Reading Panel */
+        <div className={`flex flex-1 min-h-[540px] lg:h-[calc(100vh-148px)] rounded-lg border overflow-hidden ${cardCls}`}>
+          {/* Panel 1: Email Message List */}
+          <div
+            className={`${
+              activeMessage ? "hidden lg:flex" : "flex"
+            } w-full lg:w-[340px] xl:w-[380px] shrink-0 flex-col border-r ${
+              isDark ? "border-[#27272A]" : "border-slate-200"
+            }`}
+          >
+            {/* List Top Bar */}
+            <div className={`px-3 py-2 border-b flex items-center justify-between gap-2 text-xs ${subCls}`}>
+              <div className="flex items-center gap-2 min-w-0">
                 <input
                   type="checkbox"
+                  aria-label="Select all messages"
                   checked={messages.length > 0 && selectedIds.size === messages.length}
                   onChange={(e) => {
                     if (e.target.checked) setSelectedIds(new Set(messages.map((m) => String(m.messageId))));
                     else setSelectedIds(new Set());
                   }}
                 />
-                <span className={`text-[11px] ${mutedCls}`}>{selectedIds.size > 0 ? `${selectedIds.size} selected` : `${messages.length} emails`}</span>
+                <span className="font-semibold truncate">{activeFolderName}</span>
+                <span className={`text-[11px] shrink-0 ${mutedCls}`}>
+                  {selectedIds.size > 0 ? `(${selectedIds.size} sel)` : `(${messages.length})`}
+                </span>
               </div>
               {selectedIds.size > 0 && (
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => runOperation("markRead", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800 cursor-pointer" title="Mark Read"><MailOpen className="w-3.5 h-3.5" /></button>
-                  <button type="button" onClick={() => runOperation("archive", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800 cursor-pointer" title="Archive"><Archive className="w-3.5 h-3.5" /></button>
-                  <button type="button" onClick={() => runOperation("trash", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800 text-rose-400 cursor-pointer" title="Trash"><Trash2 className="w-3.5 h-3.5" /></button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button type="button" onClick={() => runOperation("markRead", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800/50 cursor-pointer" title="Mark Read"><MailOpen className="w-3.5 h-3.5" /></button>
+                  <button type="button" onClick={() => runOperation("archive", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800/50 cursor-pointer" title="Archive"><Archive className="w-3.5 h-3.5" /></button>
+                  <button type="button" onClick={() => runOperation("trash", Array.from(selectedIds))} className="p-1 rounded hover:bg-zinc-800/50 text-rose-400 cursor-pointer" title="Trash"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/30">
+            {/* Scrollable Message Rows */}
+            <div ref={listScrollRef} className={`flex-1 overflow-y-auto divide-y ${dividerCls}`}>
               {messages.length === 0 ? (
-                <div className={`p-6 text-center text-xs ${mutedCls}`}>
-                  {loadingMessages ? "Loading emails..." : "No messages in this folder."}
+                <div className={`p-8 text-center text-xs ${mutedCls}`}>
+                  {loadingFolders || loadingMessages ? "Loading emails..." : "No messages in this folder."}
                 </div>
               ) : (
-                messages.map((m) => (
-                  <div
-                    key={m.messageId}
-                    onClick={() => openMessage(m)}
-                    className={`px-2.5 py-2 cursor-pointer flex items-start gap-2 transition ${
-                      activeMessage?.messageId === m.messageId ? "bg-amber-500/10" : "hover:bg-zinc-800/30"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(String(m.messageId))}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        const next = new Set(selectedIds);
-                        if (e.target.checked) next.add(String(m.messageId));
-                        else next.delete(String(m.messageId));
-                        setSelectedIds(next);
-                      }}
-                      className="mt-1 shrink-0"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className={`text-xs truncate ${!m.isRead ? "font-bold" : "font-medium"}`}>
-                          {m.fromName || m.fromAddress}
-                        </span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {m.hasAttachment && <Paperclip className="w-3 h-3 text-zinc-400" />}
-                          {m.isStarred && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
-                          <span className={`text-[10px] ${mutedCls}`}>
-                            {m.receivedTime ? new Date(m.receivedTime).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}
-                          </span>
+                messages.map((m) => {
+                  const preview = decodeHtmlEntities(m.summary);
+                  const isActive = activeMessage?.messageId === m.messageId;
+                  return (
+                    <div
+                      key={m.messageId}
+                      onClick={() => openMessage(m)}
+                      className={`px-3 py-2.5 cursor-pointer flex items-start gap-2.5 transition-colors ${
+                        isActive
+                          ? isDark
+                            ? "bg-amber-500/12"
+                            : "bg-amber-50"
+                          : isDark
+                          ? "hover:bg-zinc-900/70"
+                          : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${m.subject || "message"}`}
+                        checked={selectedIds.has(String(m.messageId))}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const next = new Set(selectedIds);
+                          if (e.target.checked) next.add(String(m.messageId));
+                          else next.delete(String(m.messageId));
+                          setSelectedIds(next);
+                        }}
+                        className="mt-1 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {!m.isRead && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+                            <span
+                              className={`text-xs truncate ${
+                                !m.isRead
+                                  ? "font-semibold"
+                                  : isDark
+                                  ? "font-medium text-zinc-300"
+                                  : "font-medium text-zinc-700"
+                              }`}
+                            >
+                              {decodeHtmlEntities(m.fromName || m.fromAddress)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {m.hasAttachment && <Paperclip className="w-3 h-3 text-zinc-400" />}
+                            {m.isStarred && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
+                            <span className={`text-[10px] ${mutedCls}`}>
+                              {m.receivedTime
+                                ? new Date(m.receivedTime).toLocaleDateString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                  })
+                                : ""}
+                            </span>
+                          </div>
                         </div>
+                        <div
+                          className={`text-xs truncate mt-0.5 ${
+                            !m.isRead ? "font-semibold" : "font-normal"
+                          }`}
+                        >
+                          {decodeHtmlEntities(m.subject || "(No Subject)")}
+                        </div>
+                        {preview && (
+                          <div className={`text-[11px] truncate mt-0.5 ${mutedCls}`}>{preview}</div>
+                        )}
                       </div>
-                      <div className={`text-[11px] truncate ${!m.isRead ? "font-semibold" : mutedCls}`}>{m.subject}</div>
-                      <div className={`hidden sm:block text-[11px] truncate opacity-75 ${mutedCls}`}>{m.summary}</div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
-            <div className={`px-2.5 py-1.5 border-t flex items-center justify-between text-xs ${subCls}`}>
-              <button type="button" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="p-1 disabled:opacity-40 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+            {/* Pagination Footer */}
+            <div className={`px-3 py-1.5 border-t flex items-center justify-between text-xs ${subCls}`}>
+              <button
+                type="button"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                className="p-1 disabled:opacity-40 cursor-pointer"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
               <span className={`text-[11px] ${mutedCls}`}>Page {page + 1}</span>
-              <button type="button" disabled={messages.length < 25} onClick={() => setPage((p) => p + 1)} className="p-1 disabled:opacity-40 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
+              <button
+                type="button"
+                disabled={messages.length < 25}
+                onClick={() => setPage((p) => p + 1)}
+                className="p-1 disabled:opacity-40 cursor-pointer"
+                aria-label="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* Panel 3: Reading Panel */}
-          <div className={`${activeMessage ? "flex" : "hidden lg:flex"} flex-1 min-w-0 flex-col rounded-xl border overflow-hidden ${cardCls}`}>
+          {/* Panel 2: Email Reading Panel */}
+          <div className={`${activeMessage ? "flex" : "hidden lg:flex"} flex-1 min-w-0 flex-col`}>
             {!activeMessage ? (
               <div className={`flex-1 flex flex-col items-center justify-center p-8 text-center text-xs ${mutedCls}`}>
                 <Inbox className="w-8 h-8 mb-2 opacity-50" />
@@ -718,13 +531,13 @@ export default function ZohoMailboxWorkspace({
             ) : (
               <>
                 <div className={`p-3 border-b space-y-2 ${subCls}`}>
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
-                      onClick={() => setActiveMessage(null)}
+                      onClick={handleBackToList}
                       className="lg:hidden inline-flex items-center gap-1 text-xs font-semibold text-amber-400 cursor-pointer"
                     >
-                      <ChevronLeft className="w-4 h-4" /> Back
+                      <ChevronLeft className="w-4 h-4" /> Back to {activeFolderName}
                     </button>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
@@ -733,12 +546,14 @@ export default function ZohoMailboxWorkspace({
                           onComposeAction({
                             mode: "reply",
                             to: activeMessage.fromAddress,
-                            subject: activeMessage.subject?.startsWith("Re:") ? activeMessage.subject : `Re: ${activeMessage.subject}`,
+                            subject: activeMessage.subject?.startsWith("Re:")
+                              ? activeMessage.subject
+                              : `Re: ${activeMessage.subject}`,
                             bodyHtml: `<br/><blockquote style="border-left:2px solid #cbd5e1;padding-left:10px;color:#64748b;">${activeMessage.htmlContent || ""}</blockquote>`,
                             originalMessageId: activeMessage.messageId,
                           })
                         }
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
                       >
                         <Reply className="w-3.5 h-3.5" /> Reply
                       </button>
@@ -749,12 +564,14 @@ export default function ZohoMailboxWorkspace({
                             mode: "replyAll",
                             to: activeMessage.fromAddress,
                             cc: activeMessage.ccAddress,
-                            subject: activeMessage.subject?.startsWith("Re:") ? activeMessage.subject : `Re: ${activeMessage.subject}`,
+                            subject: activeMessage.subject?.startsWith("Re:")
+                              ? activeMessage.subject
+                              : `Re: ${activeMessage.subject}`,
                             bodyHtml: `<br/><blockquote style="border-left:2px solid #cbd5e1;padding-left:10px;color:#64748b;">${activeMessage.htmlContent || ""}</blockquote>`,
                             originalMessageId: activeMessage.messageId,
                           })
                         }
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
                       >
                         <ReplyAll className="w-3.5 h-3.5" /> Reply All
                       </button>
@@ -763,24 +580,42 @@ export default function ZohoMailboxWorkspace({
                         onClick={() =>
                           onComposeAction({
                             mode: "forward",
-                            subject: activeMessage.subject?.startsWith("Fwd:") ? activeMessage.subject : `Fwd: ${activeMessage.subject}`,
+                            subject: activeMessage.subject?.startsWith("Fwd:")
+                              ? activeMessage.subject
+                              : `Fwd: ${activeMessage.subject}`,
                             bodyHtml: `<br/><p>---------- Forwarded message ---------</p>${activeMessage.htmlContent || ""}`,
                             originalMessageId: activeMessage.messageId,
                           })
                         }
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border text-xs font-medium cursor-pointer ${cardCls}`}
                       >
                         <Forward className="w-3.5 h-3.5" /> Forward
                       </button>
-                      <button type="button" onClick={() => runOperation("archive", [String(activeMessage.messageId)])} className={`p-1.5 rounded border cursor-pointer ${cardCls}`} title="Archive"><Archive className="w-3.5 h-3.5" /></button>
-                      <button type="button" onClick={() => runOperation("trash", [String(activeMessage.messageId)])} className={`p-1.5 rounded border text-rose-400 cursor-pointer ${cardCls}`} title="Trash"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button
+                        type="button"
+                        onClick={() => runOperation("archive", [String(activeMessage.messageId)])}
+                        className={`p-1.5 rounded border cursor-pointer ${cardCls}`}
+                        title="Archive"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runOperation("trash", [String(activeMessage.messageId)])}
+                        className={`p-1.5 rounded border text-rose-400 cursor-pointer ${cardCls}`}
+                        title="Trash"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
                   <div>
-                    <h3 className="text-sm font-semibold">{activeMessage.subject}</h3>
-                    <div className={`text-[11px] mt-1 ${mutedCls}`}>
-                      From: <strong>{activeMessage.fromName}</strong> &lt;{activeMessage.fromAddress}&gt;
+                    <h3 className="text-sm font-semibold break-words">
+                      {decodeHtmlEntities(activeMessage.subject)}
+                    </h3>
+                    <div className={`text-[11px] mt-1 break-words ${mutedCls}`}>
+                      From: <strong>{decodeHtmlEntities(activeMessage.fromName)}</strong> &lt;{activeMessage.fromAddress}&gt;
                       {activeMessage.toAddress ? ` • To: ${activeMessage.toAddress}` : ""}
                       {activeMessage.ccAddress ? ` • CC: ${activeMessage.ccAddress}` : ""}
                     </div>

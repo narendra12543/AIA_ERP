@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -67,7 +67,32 @@ import {
   MoreVertical,
   Search,
   UserCheck,
+  Archive,
+  Bell,
+  Folder,
+  Newspaper,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  ShieldAlert,
+  FileEdit,
 } from "lucide-react";
+
+function getZohoFolderIcon(folder: any) {
+  const n = `${folder?.folderType || ""} ${folder?.folderName || ""}`.toLowerCase();
+  if (n.includes("inbox")) return Inbox;
+  if (n.includes("draft")) return FileEdit;
+  if (n.includes("sent")) return Send;
+  if (n.includes("star")) return Star;
+  if (n.includes("archive")) return Archive;
+  if (n.includes("spam") || n.includes("junk")) return ShieldAlert;
+  if (n.includes("trash") || n.includes("delete")) return Trash2;
+  if (n.includes("snooz")) return Clock;
+  if (n.includes("template")) return FileText;
+  if (n.includes("notif")) return Bell;
+  if (n.includes("news")) return Newspaper;
+  return Folder;
+}
 import { useFinancialYear } from "../contexts/FinancialYearContext";
 import { matchesReportingFY } from "../lib/financial-year";
 import ZohoMailboxWorkspace from "./ZohoMailboxWorkspace";
@@ -200,11 +225,16 @@ export default function MailCenter({
 
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-  const [zohoClientModeTrigger, setZohoClientModeTrigger] = useState(0);
-  const [zohoSearchTrigger, setZohoSearchTrigger] = useState(0);
+  const [mailSidebarCollapsed, setMailSidebarCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [clientMode, setClientMode] = useState(false);
+  const [composeOptionsOpen, setComposeOptionsOpen] = useState(false);
+  const [composeMoreOpen, setComposeMoreOpen] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [activeTab, setActiveTab] = useState<
     "compose" | "inbox" | "drafts" | "history" | "templates" | "signatures"
-  >("compose");
+  >("inbox");
   const [loading, setLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -241,8 +271,8 @@ export default function MailCenter({
 
   // Composer state
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [selectedQuoteNo, setSelectedQuoteNo] = useState<string>(currentQuote?.quotation_no || "");
-  const [documentType, setDocumentType] = useState<string>("Quotation");
+  const [selectedQuoteNo, setSelectedQuoteNo] = useState<string>("");
+  const [documentType, setDocumentType] = useState<string>("General");
   const [toChips, setToChips] = useState<string[]>([]);
   const [toInput, setToInput] = useState("");
   const [ccEmails, setCcEmails] = useState("");
@@ -272,11 +302,64 @@ export default function MailCenter({
     | "hindi_en"
   >("professional");
 
-  // Multi-account Zoho Mailbox state
+  // Multi-account Zoho Mailbox & Folder state
   const [mailboxes, setMailboxes] = useState<any[]>([]);
   const [activeMailbox, setActiveMailbox] = useState<any | null>(null);
+  const [folders, setFolders] = useState<any[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string>("");
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const folderCacheRef = useRef<Map<string, any[]>>(new Map());
+  const folderAbortRef = useRef<AbortController | null>(null);
   const [composeMode, setComposeMode] = useState<"new" | "reply" | "replyAll" | "forward">("new");
   const [replyMeta, setReplyMeta] = useState<{ originalMessageId?: string; inReplyTo?: string }>({});
+
+  const loadFolders = useCallback(async (mailboxId: string, forceRefresh = false) => {
+    folderAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    folderAbortRef.current = ctrl;
+
+    const cached = !forceRefresh ? folderCacheRef.current.get(mailboxId) : undefined;
+    if (cached) {
+      setFolders(cached);
+      const inbox =
+        cached.find((f) => String(f.folderType || f.folderName).toLowerCase() === "inbox") || cached[0];
+      if (inbox) setActiveFolderId(inbox.folderId);
+      return;
+    }
+
+    setFolders([]);
+    setActiveFolderId("");
+    setLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/mail/folders?mailboxId=${encodeURIComponent(mailboxId)}`, {
+        signal: ctrl.signal,
+        cache: "no-store",
+        headers: getAuthHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (ctrl.signal.aborted) return;
+      if (!res.ok) return;
+      const list = Array.isArray(json.folders) ? json.folders : [];
+      folderCacheRef.current.set(mailboxId, list);
+      setFolders(list);
+      const inbox =
+        list.find((f: any) => String(f.folderType || f.folderName).toLowerCase() === "inbox") || list[0];
+      if (inbox) setActiveFolderId(inbox.folderId);
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.warn("Folder load error:", err);
+      }
+    } finally {
+      if (!ctrl.signal.aborted) setLoadingFolders(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeMailbox?.id) {
+      loadFolders(activeMailbox.id);
+    }
+    return () => folderAbortRef.current?.abort();
+  }, [activeMailbox?.id, loadFolders]);
   const [aiDiff, setAiDiff] = useState<{
     originalHtml: string;
     originalText: string;
@@ -930,66 +1013,205 @@ export default function MailCenter({
     ? String(activeMailbox.email_address).split("@")[0]
     : "mail";
   const shortMbxTitle = shortMbx.charAt(0).toUpperCase() + shortMbx.slice(1);
+  const activeFolderObj = folders.find((f) => f.folderId === activeFolderId);
+  const currentLocationLabel =
+    activeTab === "inbox"
+      ? clientMode
+        ? "Client Emails"
+        : activeFolderObj?.folderName || "Inbox"
+      : activeTab === "compose"
+      ? "Compose"
+      : activeTab === "drafts"
+      ? "ERP Drafts"
+      : activeTab === "history"
+      ? "ERP Sent History"
+      : activeTab === "templates"
+      ? "Templates"
+      : "Signatures";
+
+  const handleOpenBlankCompose = () => {
+    setComposeMode("new");
+    setReplyMeta({});
+    setSelectedQuoteNo("");
+    setDocumentType("General");
+    setActiveTab("compose");
+    setMobileDrawerOpen(false);
+  };
+
+  const handleRefreshAll = () => {
+    fetchMailData();
+    if (activeMailbox?.id) loadFolders(activeMailbox.id, true);
+    setRefreshNonce((n) => n + 1);
+  };
 
   return (
     <div
       className={`${
-        fullscreen ? "fixed inset-0 z-50 overflow-y-auto bg-[#09090b] p-2 sm:p-4" : "p-2 sm:p-4 max-w-[1440px] mx-auto w-full min-w-0"
-      } space-y-2.5`}
+        fullscreen
+          ? "fixed inset-0 z-50 overflow-y-auto bg-[#09090b] p-2 sm:p-4"
+          : "p-2 sm:p-3 lg:p-4 max-w-[1600px] mx-auto w-full min-w-0"
+      } space-y-2.5 flex flex-col`}
     >
-      {/* Mobile Compact Top Toolbar (<lg): Hamburger, Short Mailbox Label, Search, Compose, More */}
-      <div className={`${cardCls} lg:hidden rounded-xl px-2.5 py-2 flex items-center justify-between gap-1.5 relative`}>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            className={`p-1.5 rounded-lg border cursor-pointer shrink-0 ${
-              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-            }`}
-            aria-label="Open Mail Menu"
-          >
-            <Menu className="w-4 h-4" />
-          </button>
-          <span className="text-xs font-bold truncate">{shortMbxTitle}</span>
+      {/* UNIFIED COMPACT MAIL HEADER (Desktop & Mobile — zero duplicate controls) */}
+      <div className={`${cardCls} rounded-xl px-2.5 sm:px-3 py-2 space-y-2 relative`}>
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          {/* Left: Sidebar Toggle + Title + Single Desktop Mailbox Dropdown */}
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className={`lg:hidden p-1.5 rounded-lg border cursor-pointer shrink-0 ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+              }`}
+              aria-label="Open Mail Menu"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMailSidebarCollapsed((c) => !c)}
+              className={`hidden lg:inline-flex p-1.5 rounded-lg border cursor-pointer shrink-0 ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+              }`}
+              aria-label={mailSidebarCollapsed ? "Expand Mail Sidebar" : "Collapse Mail Sidebar"}
+              title={mailSidebarCollapsed ? "Expand Mail Sidebar" : "Collapse Mail Sidebar"}
+            >
+              {mailSidebarCollapsed ? (
+                <PanelLeftOpen className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
+            </button>
+
+            <div className="hidden lg:flex items-center gap-2 shrink-0">
+              <Mail className="w-4 h-4 text-amber-400" />
+              <span className="text-sm font-bold">Mail Center</span>
+            </div>
+
+            {/* Mobile compact active mailbox + current folder label */}
+            <div className="lg:hidden flex items-center gap-1.5 min-w-0">
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  activeMailbox?.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"
+                }`}
+              />
+              <span className="text-xs font-bold truncate">{shortMbxTitle}</span>
+              <span className="text-[11px] opacity-60 truncate">&bull; {currentLocationLabel}</span>
+            </div>
+
+            {/* Desktop single canonical Mailbox Dropdown */}
+            {mailboxes.length > 0 && (
+              <div className="hidden lg:flex items-center gap-1.5 ml-1">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    activeMailbox?.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"
+                  }`}
+                  title={activeMailbox?.connection_status || "Status"}
+                />
+                <select
+                  aria-label="Select Authorized Mailbox"
+                  value={activeMailbox?.id || ""}
+                  onChange={(e) => {
+                    if (bodyDirty && !window.confirm("Switch mailbox? Unsaved compose changes will remain.")) return;
+                    const found = mailboxes.find((m) => m.id === e.target.value);
+                    if (found) setActiveMailbox(found);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-xs font-semibold cursor-pointer ${inputCls}`}
+                >
+                  {mailboxes.map((m) => {
+                    const s = String(m.email_address || "").split("@")[0];
+                    const lbl = s.charAt(0).toUpperCase() + s.slice(1);
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {lbl} — {m.email_address}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Search + Refresh (Desktop) + More */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="hidden lg:block relative w-56 xl:w-64">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (activeTab !== "inbox") setActiveTab("inbox");
+                }}
+                placeholder="Search email..."
+                className={`w-full pl-8 pr-2.5 py-1 rounded-lg border text-xs ${inputCls}`}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileSearchOpen((v) => !v);
+                if (activeTab !== "inbox") setActiveTab("inbox");
+              }}
+              className={`lg:hidden p-1.5 rounded-lg border cursor-pointer ${
+                mobileSearchOpen
+                  ? "border-amber-500 text-amber-400"
+                  : isDark
+                  ? "border-zinc-700 hover:bg-zinc-800"
+                  : "border-slate-300 hover:bg-slate-100"
+              }`}
+              aria-label="Search Mail"
+              title="Search"
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRefreshAll}
+              disabled={loading || loadingFolders}
+              className={`hidden lg:inline-flex p-1.5 rounded-lg border cursor-pointer ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+              }`}
+              title="Refresh Mail"
+              aria-label="Refresh Mail"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading || loadingFolders ? "animate-spin" : ""}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileMoreOpen((v) => !v)}
+              className={`p-1.5 rounded-lg border cursor-pointer ${
+                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
+              }`}
+              aria-label="More actions"
+              title="More actions"
+            >
+              <MoreVertical className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("inbox");
-              setZohoSearchTrigger((n) => n + 1);
-            }}
-            className={`p-1.5 rounded-lg border cursor-pointer ${
-              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-            }`}
-            aria-label="Search Mail"
-            title="Search"
-          >
-            <Search className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("compose")}
-            className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 cursor-pointer"
-            aria-label="Compose"
-            title="Compose"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileMoreOpen((v) => !v)}
-            className={`p-1.5 rounded-lg border cursor-pointer ${
-              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-            }`}
-            aria-label="More actions"
-            title="More actions"
-          >
-            <MoreVertical className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* Mobile inline search row */}
+        {mobileSearchOpen && (
+          <div className="lg:hidden relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                if (activeTab !== "inbox") setActiveTab("inbox");
+              }}
+              placeholder="Search sender, subject, content..."
+              className={`w-full pl-8 pr-2.5 py-1.5 rounded-lg border text-xs ${inputCls}`}
+            />
+          </div>
+        )}
 
+        {/* Shared More Actions Menu */}
         {mobileMoreOpen && (
           <div
             className={`absolute right-2 top-full mt-1 w-48 z-40 rounded-xl border shadow-xl p-1.5 space-y-1 text-xs ${
@@ -1000,7 +1222,7 @@ export default function MailCenter({
               type="button"
               onClick={() => {
                 setMobileMoreOpen(false);
-                fetchMailData();
+                handleRefreshAll();
               }}
               className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 flex items-center gap-2 cursor-pointer"
             >
@@ -1024,26 +1246,26 @@ export default function MailCenter({
                   setMobileMoreOpen(false);
                   onOpenAdminSettings();
                 }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 flex items-center gap-2 cursor-pointer"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 flex items-center gap-2 cursor-pointer text-amber-400"
               >
-                <Mail className="w-3.5 h-3.5 text-amber-400" /> Manage Mail Accounts
+                <Settings className="w-3.5 h-3.5" /> Manage Mail Accounts
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Mobile Unified Hamburger Drawer (<lg): All Zoho Folders & ERP Mail Views */}
+      {/* MOBILE UNIFIED HAMBURGER DRAWER (<lg) */}
       {mobileDrawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-xs"
             onClick={() => setMobileDrawerOpen(false)}
           />
-          <div className={`relative z-10 w-68 max-w-[84vw] h-full p-3 border-r flex flex-col gap-3 overflow-y-auto ${cardCls}`}>
+          <div className={`relative z-10 w-72 max-w-[85vw] h-full p-3 border-r flex flex-col gap-3 overflow-y-auto ${cardCls}`}>
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800/40">
               <span className="text-xs font-bold flex items-center gap-1.5">
-                <Mail className="w-4 h-4 text-emerald-500" /> Mail Center
+                <Mail className="w-4 h-4 text-amber-400" /> Mail Center
               </span>
               <button
                 type="button"
@@ -1055,95 +1277,151 @@ export default function MailCenter({
               </button>
             </div>
 
+            {/* Single Mobile Mailbox Dropdown */}
+            {mailboxes.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1">Mailbox</div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      activeMailbox?.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"
+                    }`}
+                  />
+                  <select
+                    aria-label="Mobile Select Mailbox"
+                    value={activeMailbox?.id || ""}
+                    onChange={(e) => {
+                      if (bodyDirty && !window.confirm("Switch mailbox? Unsaved compose changes will remain.")) return;
+                      const found = mailboxes.find((m) => m.id === e.target.value);
+                      if (found) {
+                        setActiveMailbox(found);
+                        setClientMode(false);
+                        setActiveTab("inbox");
+                        setMobileDrawerOpen(false);
+                      }
+                    }}
+                    className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border text-xs font-semibold ${inputCls}`}
+                  >
+                    {mailboxes.map((m) => {
+                      const s = String(m.email_address || "").split("@")[0];
+                      const lbl = s.charAt(0).toUpperCase() + s.slice(1);
+                      return (
+                        <option key={m.id} value={m.id}>
+                          {lbl} — {m.email_address}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+            )}
+
             <button
               type="button"
-              onClick={() => {
-                setActiveTab("compose");
-                setMobileDrawerOpen(false);
-              }}
-              className="w-full py-2 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={handleOpenBlankCompose}
+              className="w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" /> Compose
             </button>
 
-            {mailboxes.length > 0 && (
-              <div className="space-y-1">
-                <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1">Mailboxes</div>
-                {mailboxes.map((m) => {
-                  const s = String(m.email_address || "").split("@")[0];
-                  const lbl = s.charAt(0).toUpperCase() + s.slice(1);
-                  const isAct = activeMailbox?.id === m.id;
+            {/* Individual Zoho Provider Folders */}
+            <div className="space-y-0.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1 pb-1">
+                Mail Folders
+              </div>
+              {loadingFolders && folders.length === 0 ? (
+                <div className="px-2 py-1.5 text-[11px] opacity-60">Loading folders...</div>
+              ) : folders.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClientMode(false);
+                    setActiveTab("inbox");
+                    setMobileDrawerOpen(false);
+                  }}
+                  className={`w-full px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 cursor-pointer ${
+                    activeTab === "inbox" ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"
+                  }`}
+                >
+                  <Inbox className="w-3.5 h-3.5" /> Inbox
+                </button>
+              ) : (
+                folders.map((f) => {
+                  const Icon = getZohoFolderIcon(f);
+                  const isAct = activeTab === "inbox" && !clientMode && activeFolderId === f.folderId;
                   return (
                     <button
-                      key={m.id}
+                      key={f.folderId}
                       type="button"
                       onClick={() => {
-                        setActiveMailbox(m);
+                        setActiveFolderId(f.folderId);
+                        setClientMode(false);
                         setActiveTab("inbox");
                         setMobileDrawerOpen(false);
                       }}
-                      className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between cursor-pointer ${
-                        isAct ? "bg-emerald-500/15 text-emerald-400 font-semibold" : "opacity-80 hover:bg-zinc-800/40"
+                      className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 cursor-pointer ${
+                        isAct ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"
                       }`}
                     >
-                      <span className="truncate">{lbl} ({m.email_address})</span>
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${m.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                      <span className="flex items-center gap-2 min-w-0">
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{f.folderName}</span>
+                      </span>
+                      {f.unreadCount > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold">
+                          {f.unreadCount}
+                        </span>
+                      )}
                     </button>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
 
-            <div className="space-y-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1">Zoho Mail Folders</div>
+            {/* ERP Tools (clearly distinguished from Zoho folders) */}
+            <div className="space-y-0.5 pt-2 border-t border-zinc-800/40">
+              <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1 pb-1">
+                ERP Tools
+              </div>
+              {(
+                [
+                  { id: "drafts", label: `ERP Drafts (${drafts.length})`, icon: FileEdit },
+                  { id: "history", label: `ERP Sent History (${history.length})`, icon: Clock },
+                  { id: "templates", label: `ERP Templates (${templates.length})`, icon: FileText },
+                  { id: "signatures", label: `Signatures (${signatures.length})`, icon: PenTool },
+                ] as const
+              ).map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setClientMode(false);
+                      setActiveTab(item.id);
+                      setMobileDrawerOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer flex items-center gap-2 ${
+                      activeTab === item.id ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
               <button
                 type="button"
                 onClick={() => {
+                  setClientMode(true);
                   setActiveTab("inbox");
                   setMobileDrawerOpen(false);
                 }}
                 className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer flex items-center gap-2 ${
-                  activeTab === "inbox" ? "bg-emerald-600 text-white" : "hover:bg-zinc-800/40"
+                  activeTab === "inbox" && clientMode ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"
                 }`}
               >
-                <Inbox className="w-3.5 h-3.5" /> Inbox &amp; Zoho Folders (Drafts, Sent, Starred, Archive, Spam, Trash)
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-1">ERP Records</div>
-              {(
-                [
-                  { id: "drafts", label: `ERP Drafts (${drafts.length})` },
-                  { id: "history", label: `ERP Sent History (${history.length})` },
-                  { id: "templates", label: `Templates (${templates.length})` },
-                  { id: "signatures", label: `Signatures (${signatures.length})` },
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setMobileDrawerOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
-                    activeTab === item.id ? "bg-emerald-600 text-white" : "hover:bg-zinc-800/40"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("inbox");
-                  setZohoClientModeTrigger((n) => n + 1);
-                  setMobileDrawerOpen(false);
-                }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:bg-zinc-800/40 flex items-center gap-2"
-              >
-                <UserCheck className="w-3.5 h-3.5" /> Client Emails
+                <UserCheck className="w-3.5 h-3.5 shrink-0" /> Client Emails
               </button>
               {canEditSettings && onOpenAdminSettings && (
                 <button
@@ -1152,98 +1430,15 @@ export default function MailCenter({
                     setMobileDrawerOpen(false);
                     onOpenAdminSettings();
                   }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:bg-zinc-800/40 text-amber-400"
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:bg-zinc-800/40 flex items-center gap-2 text-amber-400"
                 >
-                  Manage Mail Accounts
+                  <Settings className="w-3.5 h-3.5 shrink-0" /> Manage Mail Accounts
                 </button>
               )}
             </div>
           </div>
         </div>
       )}
-
-      {/* Desktop Compact Header & Navigation Bar (lg+) */}
-      <div className={`${cardCls} hidden lg:flex rounded-xl px-3 py-2 items-center justify-between gap-2`}>
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
-            <Mail className="w-4 h-4 text-emerald-500" />
-          </div>
-          <span className="text-sm font-bold truncate">Mail Center</span>
-          {activeMailbox && (
-            <span
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border border-zinc-700/60 shrink-0"
-              title={activeMailbox.email_address}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  activeMailbox.connection_status === "Connected" ? "bg-emerald-400" : "bg-amber-400"
-                }`}
-              />
-              {shortMbxTitle}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          {canEditSettings && onOpenAdminSettings && (
-            <button
-              onClick={onOpenAdminSettings}
-              className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold cursor-pointer ${
-                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              Manage Mail Accounts
-            </button>
-          )}
-          <button
-            onClick={() => setFullscreen((f) => !f)}
-            className={`p-1.5 rounded-lg border cursor-pointer ${
-              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-            }`}
-            title={fullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          >
-            {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            onClick={fetchMailData}
-            disabled={loading}
-            className={`p-1.5 rounded-lg border cursor-pointer ${
-              isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-            }`}
-            title="Refresh Mail Center"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* Desktop Compact Mail Navigation Tabs (lg+ only — mobile uses hamburger drawer) */}
-      <div className="hidden lg:flex items-center gap-1.5">
-        {(
-          [
-            { id: "compose", label: "Compose" },
-            { id: "inbox", label: "Zoho Inbox" },
-            { id: "drafts", label: `Drafts (ERP) (${drafts.length})` },
-            { id: "history", label: `Sent (ERP) (${history.length})` },
-            { id: "templates", label: `Templates (${templates.length})` },
-            { id: "signatures", label: `Signatures (${signatures.length})` },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-              activeTab === tab.id
-                ? "bg-emerald-600 text-white"
-                : isDark
-                ? "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
-                : "bg-white text-slate-600 hover:text-zinc-900 border border-slate-200"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
 
       {statusBanner && (
         <div
@@ -1262,16 +1457,160 @@ export default function MailCenter({
         </div>
       )}
 
+      {/* UNIFIED WORKSPACE BODY: Desktop Mail Navigation Sidebar | Active Mail View */}
+      <div className="flex flex-1 min-w-0 gap-2.5">
+        {/* DESKTOP COLLAPSIBLE MAIL CENTER SIDEBAR (independent of ERP main sidebar) */}
+        <aside
+          className={`hidden lg:flex flex-col shrink-0 rounded-xl border p-2 space-y-2 transition-[width] duration-200 overflow-hidden ${
+            mailSidebarCollapsed ? "w-14" : "w-56"
+          } ${cardCls}`}
+        >
+          <button
+            type="button"
+            onClick={handleOpenBlankCompose}
+            title="Compose New Email"
+            className={`w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+              mailSidebarCollapsed ? "px-0" : "px-3"
+            }`}
+          >
+            <Send className="w-3.5 h-3.5 shrink-0" />
+            {!mailSidebarCollapsed && <span>Compose</span>}
+          </button>
+
+          {/* Individual Zoho Provider Folders */}
+          <div className="space-y-0.5 flex-1 overflow-y-auto min-h-0">
+            {!mailSidebarCollapsed && (
+              <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-2 py-1">
+                Mail Folders
+              </div>
+            )}
+            {folders.length === 0 ? (
+              <button
+                type="button"
+                title="Inbox"
+                onClick={() => {
+                  setClientMode(false);
+                  setActiveTab("inbox");
+                }}
+                className={`w-full py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer ${
+                  mailSidebarCollapsed ? "justify-center px-0" : "px-2.5"
+                } ${activeTab === "inbox" && !clientMode ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"}`}
+              >
+                <Inbox className="w-4 h-4 shrink-0" />
+                {!mailSidebarCollapsed && <span className="truncate">Inbox</span>}
+              </button>
+            ) : (
+              folders.map((f) => {
+                const Icon = getZohoFolderIcon(f);
+                const isAct = activeTab === "inbox" && !clientMode && activeFolderId === f.folderId;
+                return (
+                  <button
+                    key={f.folderId}
+                    type="button"
+                    title={f.folderName}
+                    onClick={() => {
+                      setActiveFolderId(f.folderId);
+                      setClientMode(false);
+                      setActiveTab("inbox");
+                    }}
+                    className={`w-full py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer ${
+                      mailSidebarCollapsed ? "justify-center px-0" : "justify-between px-2.5"
+                    } ${isAct ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"}`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Icon className="w-4 h-4 shrink-0" />
+                      {!mailSidebarCollapsed && <span className="truncate">{f.folderName}</span>}
+                    </span>
+                    {!mailSidebarCollapsed && f.unreadCount > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold shrink-0">
+                        {f.unreadCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+
+            {/* ERP Tools */}
+            <div className="pt-2 mt-2 border-t border-zinc-800/40 space-y-0.5">
+              {!mailSidebarCollapsed && (
+                <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 px-2 py-1">
+                  ERP Tools
+                </div>
+              )}
+              {(
+                [
+                  { id: "drafts", label: `ERP Drafts (${drafts.length})`, short: "ERP Drafts", icon: FileEdit },
+                  { id: "history", label: `ERP Sent History (${history.length})`, short: "ERP Sent History", icon: Clock },
+                  { id: "templates", label: `ERP Templates (${templates.length})`, short: "Templates", icon: FileText },
+                  { id: "signatures", label: `Signatures (${signatures.length})`, short: "Signatures", icon: PenTool },
+                ] as const
+              ).map((item) => {
+                const Icon = item.icon;
+                const isAct = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    title={item.short}
+                    onClick={() => {
+                      setClientMode(false);
+                      setActiveTab(item.id);
+                    }}
+                    className={`w-full py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer ${
+                      mailSidebarCollapsed ? "justify-center px-0" : "px-2.5"
+                    } ${isAct ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"}`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {!mailSidebarCollapsed && <span className="truncate">{item.label}</span>}
+                  </button>
+                );
+              })}
+
+              <button
+                type="button"
+                title="Client Emails"
+                onClick={() => {
+                  setClientMode((v) => !v);
+                  setActiveTab("inbox");
+                }}
+                className={`w-full py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer ${
+                  mailSidebarCollapsed ? "justify-center px-0" : "px-2.5"
+                } ${activeTab === "inbox" && clientMode ? "bg-amber-500/15 text-amber-400 font-semibold" : "hover:bg-zinc-800/40"}`}
+              >
+                <UserCheck className="w-4 h-4 shrink-0" />
+                {!mailSidebarCollapsed && <span className="truncate">Client Emails</span>}
+              </button>
+
+              {canEditSettings && onOpenAdminSettings && (
+                <button
+                  type="button"
+                  title="Manage Mail Accounts"
+                  onClick={onOpenAdminSettings}
+                  className={`w-full py-1.5 rounded-lg text-xs flex items-center gap-2 cursor-pointer text-amber-400 hover:bg-zinc-800/40 ${
+                    mailSidebarCollapsed ? "justify-center px-0" : "px-2.5"
+                  }`}
+                >
+                  <Settings className="w-4 h-4 shrink-0" />
+                  {!mailSidebarCollapsed && <span className="truncate">Manage Mail Accounts</span>}
+                </button>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* ACTIVE MAIL VIEW CONTAINER */}
+        <div className="flex-1 min-w-0 flex flex-col">
       {/* COMPOSE WORKSPACE */}
       {activeTab === "compose" && (
         <div className={`${cardCls} rounded-xl overflow-hidden`}>
-          {/* Top Action Toolbar (Zoho-style) */}
+          {/* Top Action Toolbar (Send prominent; secondary actions compact) */}
           <div
-            className={`px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-2 ${
+            className={`px-3 sm:px-4 py-2 border-b flex items-center justify-between gap-2 relative ${
               isDark ? "bg-zinc-900/70 border-zinc-800" : "bg-slate-50 border-slate-200"
             }`}
           >
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
               {canSend && (
                 <button
                   type="button"
@@ -1286,7 +1625,7 @@ export default function MailCenter({
                 <button
                   type="button"
                   onClick={handleSaveDraft}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${
+                  className={`hidden sm:inline-flex px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer items-center gap-1.5 ${
                     isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-white"
                   }`}
                 >
@@ -1296,27 +1635,94 @@ export default function MailCenter({
               <button
                 type="button"
                 onClick={handleDiscardDraft}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                className="hidden sm:inline-flex px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10 cursor-pointer"
               >
                 Discard
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setComposeOptionsOpen((v) => !v)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border cursor-pointer flex items-center gap-1 ${
+                  composeOptionsOpen
+                    ? "border-amber-500 text-amber-400"
+                    : isDark
+                    ? "border-zinc-700 hover:bg-zinc-800"
+                    : "border-slate-300 hover:bg-white"
+                }`}
+              >
+                <span>Options</span>
+                {composeOptionsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
               <button
                 type="button"
                 onClick={() => setPreviewOpen(true)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${
+                className={`hidden sm:inline-flex px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer items-center gap-1.5 ${
                   isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-white"
                 }`}
               >
                 <Eye className="w-3.5 h-3.5" /> Preview Email
               </button>
+              <button
+                type="button"
+                onClick={() => setComposeMoreOpen((v) => !v)}
+                className={`sm:hidden p-1.5 rounded-lg border cursor-pointer ${
+                  isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-white"
+                }`}
+                aria-label="Compose options"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
             </div>
+
+            {composeMoreOpen && (
+              <div
+                className={`sm:hidden absolute right-2 top-full mt-1 w-44 z-30 rounded-xl border shadow-xl p-1.5 space-y-1 text-xs ${
+                  isDark ? "bg-zinc-950 border-zinc-700 text-zinc-100" : "bg-white border-slate-200 text-zinc-900"
+                }`}
+              >
+                {canSend && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposeMoreOpen(false);
+                      handleSaveDraft();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" /> Save Draft
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposeMoreOpen(false);
+                    setPreviewOpen(true);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 flex items-center gap-2 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" /> Preview Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposeMoreOpen(false);
+                    handleDiscardDraft();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/40 text-rose-400 flex items-center gap-2 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Discard
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="p-4 sm:p-5 space-y-4">
-            {/* Compact Linked Document & Template Selector */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="p-3 sm:p-4 space-y-3">
+            {/* Compact Expandable Options (Linked Quotation, Document Type, Template, Signature) */}
+            {composeOptionsOpen && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 rounded-lg border border-zinc-800/40">
               <div>
                 <label className="block text-[11px] font-semibold mb-1 opacity-75">Linked Quotation</label>
                 <select
@@ -1324,6 +1730,7 @@ export default function MailCenter({
                   onChange={(e) => handleLinkedDocumentChange(e.target.value, documentType)}
                   className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
                 >
+                  <option value="">None (Standard Email)</option>
                   {fyFilteredQuotations.map((q) => (
                     <option key={q.id || q.quotation_no} value={q.quotation_no}>
                       {q.quotation_no} — {q.client_name}
@@ -1338,11 +1745,11 @@ export default function MailCenter({
                   onChange={(e) => handleLinkedDocumentChange(selectedQuoteNo, e.target.value)}
                   className={`w-full h-9 px-3 rounded-lg border text-xs ${inputCls}`}
                 >
+                  <option value="General">General Email</option>
                   <option value="Quotation">Quotation</option>
                   <option value="Proforma Invoice">Proforma Invoice</option>
                   <option value="Tax Invoice">Tax Invoice</option>
                   <option value="Purchase Order">Purchase Order</option>
-                  <option value="General">General Email</option>
                 </select>
               </div>
               <div>
@@ -1390,6 +1797,7 @@ export default function MailCenter({
                 </div>
               </div>
             </div>
+            )}
 
             {/* Zoho-Style Full-Width Header Rows: From, To, CC, BCC, Subject */}
             <div className={`rounded-lg border divide-y ${isDark ? "border-zinc-800 divide-zinc-800" : "border-slate-200 divide-slate-200"}`}>
@@ -2021,13 +2429,14 @@ export default function MailCenter({
           isAdmin={(currentUser.role || "").toLowerCase() === "admin"}
           mailboxes={mailboxes}
           activeMailbox={activeMailbox}
-          onSelectMailbox={(mbx) => {
-            if (bodyDirty && !window.confirm("Switch mailbox? You have unsaved compose text.")) return;
-            setActiveMailbox(mbx);
-          }}
+          folders={folders}
+          activeFolderId={activeFolderId}
+          loadingFolders={loadingFolders}
+          searchQuery={searchQuery}
+          clientMode={clientMode}
+          refreshNonce={refreshNonce}
+          onRefreshFolders={() => activeMailbox?.id && loadFolders(activeMailbox.id, true)}
           onOpenAdminSettings={onOpenAdminSettings}
-          clientModeTrigger={zohoClientModeTrigger}
-          searchTrigger={zohoSearchTrigger}
           onComposeAction={(opts) => {
             setComposeMode(opts.mode);
             setReplyMeta({ originalMessageId: opts.originalMessageId, inReplyTo: opts.inReplyTo });
@@ -2254,6 +2663,8 @@ export default function MailCenter({
           onSaved={fetchMailData}
         />
       )}
+        </div>
+      </div>
 
       {/* Email Preview Modal */}
       {previewOpen && (
