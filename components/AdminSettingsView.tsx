@@ -28,6 +28,8 @@ interface AdminSettingsViewProps {
   company: CompanyInfo;
   onOpenUserManagement: () => void;
   onOpenAuditLogs: () => void;
+  oauthFeedback?: { status: string; message: string } | null;
+  onClearOAuthFeedback?: () => void;
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -50,6 +52,8 @@ export default function AdminSettingsView({
   company,
   onOpenUserManagement,
   onOpenAuditLogs,
+  oauthFeedback,
+  onClearOAuthFeedback,
 }: AdminSettingsViewProps) {
   const isDark = theme === "dark";
   const [activeSection, setActiveSection] = useState<
@@ -328,7 +332,11 @@ export default function AdminSettingsView({
       {/* 1. ZOHO MAIL OAUTH ACCOUNTS & SMTP CONFIGURATION */}
       {activeSection === "smtp" && (
         <div className="space-y-4">
-          <AdminMailAccountsSection theme={theme} />
+          <AdminMailAccountsSection
+            theme={theme}
+            oauthFeedback={oauthFeedback}
+            onClearOAuthFeedback={onClearOAuthFeedback}
+          />
           <form onSubmit={handleSaveSmtp} className={`${cardCls} rounded-xl p-4 sm:p-5 space-y-4`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-800/60">
             <div>

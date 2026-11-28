@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { query, initDb } from "@/lib/db";
+import { query, initDb, isProduction } from "@/lib/db";
 import { authenticateRequest, logAudit } from "@/lib/auth";
+import { encryptSecret } from "@/lib/crypto";
 import { hasPermission, normalizeRole } from "@/lib/permissions";
 import { buildZohoAuthUrl, generatePkcePair, getZohoConfig } from "@/lib/zoho-mail";
 
@@ -71,7 +72,29 @@ export async function POST(req: NextRequest) {
       { actorName: auth.user.name, module: "mail", recordRef: mbx.email_address, outcome: "SUCCESS" }
     );
 
-    return NextResponse.json({ authUrl, expiresAt });
+    // Bind initiating ERP session & OAuth state in a short-lived, encrypted HttpOnly cookie
+    // with SameSite=Lax so Zoho's cross-site GET redirect back to /api/mail/oauth/callback
+    // can securely revalidate the initiating session without weakening aven_session (SameSite=Strict).
+    const oauthCtxPayload = encryptSecret(
+      JSON.stringify({
+        state,
+        sessionId: auth.user.id,
+        sessionToken: auth.user.token,
+        userId: auth.user.userId,
+        mailboxId,
+        expiresAtMs: Date.now() + 10 * 60 * 1000,
+      })
+    );
+
+    const res = NextResponse.json({ authUrl, expiresAt });
+    res.cookies.set("aven_mail_oauth_ctx", oauthCtxPayload, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/api/mail/oauth/callback",
+      maxAge: 600,
+    });
+    return res;
   } catch (err: any) {
     console.error("OAuth start error:", err);
     return NextResponse.json({ error: err?.message || "Failed to initiate Zoho OAuth." }, { status: 500 });

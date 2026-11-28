@@ -66,6 +66,7 @@ export default function Home() {
   const [isAuditLogsOpen, setIsAuditLogsOpen] = useState(false);
   const [users, setUsers] = useState<User[]>(initialData.users);
   const [mailSeed, setMailSeed] = useState<MailComposeSeed | null>(null);
+  const [mailOauthFeedback, setMailOauthFeedback] = useState<{ status: string; message: string } | null>(null);
 
   // Business state
   const [company, setCompany] = useState<CompanyInfo>(initialData.company);
@@ -187,6 +188,19 @@ export default function Home() {
       // Clear legacy localStorage user token so new tabs cannot bypass login
       localStorage.removeItem("aven_current_user");
 
+      // Capture Zoho OAuth callback feedback parameters if redirected back from Zoho
+      let hadMailOauth = false;
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const mailOauth = sp.get("mail_oauth");
+        const mailMsg = sp.get("mail_msg");
+        if (mailOauth && mailMsg) {
+          hadMailOauth = true;
+          setMailOauthFeedback({ status: mailOauth, message: mailMsg });
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+      } catch {}
+
       const tabSessionRaw = sessionStorage.getItem("aven_tab_session");
       if (tabSessionRaw) {
         try {
@@ -210,6 +224,9 @@ export default function Home() {
                   setSessionSecondsLeft(left);
                   if (!data.mustChangePassword) {
                     loadPersistentData(tabSession.token);
+                    if (hadMailOauth && (data.user.role || "").toUpperCase() === "ADMIN") {
+                      setCurrentView("settings");
+                    }
                   }
                 } else {
                   sessionStorage.removeItem("aven_tab_session");
@@ -1088,6 +1105,8 @@ export default function Home() {
                   setIsUserModalOpen(true);
                 }}
                 onOpenAuditLogs={() => setIsAuditLogsOpen(true)}
+                oauthFeedback={mailOauthFeedback}
+                onClearOAuthFeedback={() => setMailOauthFeedback(null)}
               />
             </div>
           ) : (

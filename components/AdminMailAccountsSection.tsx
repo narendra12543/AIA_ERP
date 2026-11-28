@@ -14,11 +14,31 @@ import {
 
 interface AdminMailAccountsSectionProps {
   theme: "dark" | "light";
+  oauthFeedback?: { status: string; message: string } | null;
+  onClearOAuthFeedback?: () => void;
+}
+
+function getTabAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (typeof window !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem("aven_tab_session");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.token) headers["x-tab-session"] = parsed.token;
+      }
+    } catch {}
+  }
+  return headers;
 }
 
 const ROLES = ["Sales", "Accounts", "Purchase", "Store", "Staff"];
 
-export default function AdminMailAccountsSection({ theme }: AdminMailAccountsSectionProps) {
+export default function AdminMailAccountsSection({
+  theme,
+  oauthFeedback,
+  onClearOAuthFeedback,
+}: AdminMailAccountsSectionProps) {
   const isDark = theme === "dark";
   const [mailboxes, setMailboxes] = useState<any[]>([]);
   const [permissions, setPermissions] = useState<any[]>([]);
@@ -39,7 +59,10 @@ export default function AdminMailAccountsSection({ theme }: AdminMailAccountsSec
   const loadAccounts = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/mail/accounts", { cache: "no-store" });
+      const res = await fetch("/api/mail/accounts", {
+        cache: "no-store",
+        headers: getTabAuthHeaders(),
+      });
       if (!res.ok) return;
       const json = await res.json();
       setMailboxes(json.mailboxes || []);
@@ -56,13 +79,24 @@ export default function AdminMailAccountsSection({ theme }: AdminMailAccountsSec
     loadAccounts();
   }, []);
 
+  useEffect(() => {
+    if (oauthFeedback && oauthFeedback.message) {
+      setNotice({
+        type: oauthFeedback.status === "connected" ? "ok" : "err",
+        text: oauthFeedback.message,
+      });
+      loadAccounts();
+      onClearOAuthFeedback?.();
+    }
+  }, [oauthFeedback]);
+
   const handleConnectOAuth = async (mailboxId: string) => {
     setNotice(null);
     setBusyId(mailboxId);
     try {
       const res = await fetch("/api/mail/oauth/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getTabAuthHeaders(),
         body: JSON.stringify({ mailboxId }),
       });
       const json = await res.json();
@@ -86,7 +120,7 @@ export default function AdminMailAccountsSection({ theme }: AdminMailAccountsSec
     try {
       const res = await fetch("/api/mail/accounts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getTabAuthHeaders(),
         body: JSON.stringify(payload),
       });
       const json = await res.json();
@@ -113,7 +147,7 @@ export default function AdminMailAccountsSection({ theme }: AdminMailAccountsSec
     };
     const res = await fetch("/api/mail/accounts", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: getTabAuthHeaders(),
       body: JSON.stringify(body),
     });
     const json = await res.json();
