@@ -39,6 +39,13 @@ export type PermissionKey =
   | "mail.templates"
   | "mail.signatures"
   | "mail.settings"
+  | "mail.manage_accounts"
+  | "mail.reply_forward"
+  | "mail.attachments"
+  | "mail.folders"
+  | "mail.archive"
+  | "mail.trash"
+  | "mail.labels"
   | "users.manage"
   | "permissions.manage"
   | "audit_logs.view"
@@ -126,6 +133,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "mail.templates", label: "Manage Email Templates", description: "Create and edit reusable email templates" },
       { key: "mail.signatures", label: "Manage Signatures", description: "Create and edit email signatures" },
       { key: "mail.settings", label: "Mail Settings", description: "Configure Zoho Mail connection and signatures" },
+      { key: "mail.manage_accounts", label: "Manage Mail Accounts", description: "Connect, disconnect, and assign company mailboxes" },
+      { key: "mail.reply_forward", label: "Reply & Forward", description: "Reply, reply all, and forward mailbox emails" },
+      { key: "mail.attachments", label: "Download Mail Attachments", description: "Preview and download incoming mail attachments" },
+      { key: "mail.folders", label: "Manage Mail Folders", description: "Create and rename mailbox folders" },
+      { key: "mail.archive", label: "Archive Emails", description: "Archive mailbox messages" },
+      { key: "mail.trash", label: "Trash & Delete Emails", description: "Move emails to trash or permanently delete" },
+      { key: "mail.labels", label: "Manage Mail Labels", description: "Apply and remove mailbox labels" },
     ],
   },
   {

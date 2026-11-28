@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { CompanyInfo, User } from "../lib/types";
 import SecurityCenterSection from "./SecurityCenterSection";
+import AdminMailAccountsSection from "./AdminMailAccountsSection";
 
 interface AdminSettingsViewProps {
   theme: "dark" | "light";
@@ -324,9 +325,11 @@ export default function AdminSettingsView({
         </div>
       )}
 
-      {/* 1. EMAIL & SMTP CONFIGURATION */}
+      {/* 1. ZOHO MAIL OAUTH ACCOUNTS & SMTP CONFIGURATION */}
       {activeSection === "smtp" && (
-        <form onSubmit={handleSaveSmtp} className={`${cardCls} rounded-xl p-4 sm:p-5 space-y-4`}>
+        <div className="space-y-4">
+          <AdminMailAccountsSection theme={theme} />
+          <form onSubmit={handleSaveSmtp} className={`${cardCls} rounded-xl p-4 sm:p-5 space-y-4`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-800/60">
             <div>
               <h3 className="text-sm font-bold">Email & SMTP Configuration</h3>
@@ -537,6 +540,7 @@ export default function AdminSettingsView({
             </div>
           </div>
         </form>
+        </div>
       )}
 
       {/* 2. AI ASSISTANT CONFIGURATION */}
