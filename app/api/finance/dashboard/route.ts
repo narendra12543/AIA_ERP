@@ -169,10 +169,36 @@ export async function GET(req: NextRequest) {
     const poStatsRes = await query(
       `SELECT
          COUNT(*) FILTER (WHERE status IN ('Draft','Issued','Sent'))::int AS active_pos,
-         COUNT(*)::int AS total_pos
+         COUNT(*)::int AS total_pos,
+         COUNT(*) FILTER (WHERE COALESCE(approval_status, data->>'approval_status', 'Draft') = 'Pending Approval')::int AS pending_po_approvals
        FROM purchase_orders`,
       []
-    ).catch(() => ({ rows: [{ active_pos: 0, total_pos: 0 }] }));
+    ).catch(async () => {
+      const fallback = await query(
+        `SELECT
+           COUNT(*) FILTER (WHERE status IN ('Draft','Issued','Sent'))::int AS active_pos,
+           COUNT(*)::int AS total_pos,
+           COUNT(*) FILTER (WHERE COALESCE(data->>'approval_status', 'Draft') = 'Pending Approval')::int AS pending_po_approvals
+         FROM purchase_orders`,
+        []
+      ).catch(() => ({ rows: [{ active_pos: 0, total_pos: 0, pending_po_approvals: 0 }] }));
+      return fallback;
+    });
+    const outstandingOrdersRes = await query(
+      `SELECT fo.id, fo.order_no, fo.client_name, fo.order_date, fo.total_order_value,
+              COALESCE(p.paid, 0)::numeric AS paid_amount,
+              GREATEST(0, fo.total_order_value - COALESCE(p.paid, 0))::numeric AS outstanding
+       FROM finance_orders fo
+       LEFT JOIN (
+         SELECT order_id, SUM(CASE WHEN status='Posted' THEN amount ELSE 0 END) AS paid
+         FROM finance_customer_payments GROUP BY order_id
+       ) p ON p.order_id = fo.id
+       WHERE fo.order_status <> 'Cancelled' ${orderDateCond}
+         AND GREATEST(0, fo.total_order_value - COALESCE(p.paid, 0)) > 0
+       ORDER BY outstanding DESC, fo.order_date DESC
+       LIMIT 10`,
+      fyParams
+    ).catch(() => ({ rows: [] }));
     const vendorCountRes = await query(`SELECT COUNT(*)::int AS cnt FROM vendors`, []).catch(() => ({
       rows: [{ cnt: 0 }],
     }));
@@ -198,6 +224,7 @@ export async function GET(req: NextRequest) {
     const monthlyRes = await query(
       `SELECT TO_CHAR(d.dt, 'YYYY-MM') AS month,
               COALESCE(o.turnover, 0)::numeric AS turnover,
+              COALESCE(o.order_total_incl_gst, 0)::numeric AS order_total_incl_gst,
               COALESCE(e.expenses, 0)::numeric AS expenses
        FROM (
          SELECT DISTINCT DATE_TRUNC('month', fo.order_date) AS dt FROM finance_orders fo WHERE 1=1 ${orderDateCond}
@@ -205,7 +232,9 @@ export async function GET(req: NextRequest) {
          SELECT DISTINCT DATE_TRUNC('month', ec.expense_date) AS dt FROM expense_claims ec WHERE ec.status = 'Approved' ${expDateCond}
        ) d
        LEFT JOIN (
-         SELECT DATE_TRUNC('month', fo.order_date) AS dt, SUM(fo.basic_value) AS turnover
+         SELECT DATE_TRUNC('month', fo.order_date) AS dt,
+                SUM(fo.basic_value) AS turnover,
+                SUM(fo.total_order_value) AS order_total_incl_gst
          FROM finance_orders fo WHERE fo.order_status <> 'Cancelled' ${orderDateCond} GROUP BY 1
        ) o ON o.dt = d.dt
        LEFT JOIN (
@@ -242,11 +271,13 @@ export async function GET(req: NextRequest) {
         pendingExpenseApprovals: Number(expSum.pending_approvals || 0),
         activePurchaseOrders: Number(poStats.active_pos || 0),
         totalPurchaseOrders: Number(poStats.total_pos || 0),
+        pendingPoApprovalsCount: Number(poStats.pending_po_approvals || 0),
         registeredVendors: Number(vendorCountRes?.rows[0]?.cnt || 0),
       },
       monthlySeries: monthlyRes?.rows || [],
       expenseByCategory: expByCatRes?.rows || [],
       clientSummary: clientSumRes?.rows || [],
+      outstandingOrders: outstandingOrdersRes?.rows || [],
     });
   } catch (err: any) {
     console.error("Failed to compute finance dashboard:", err);

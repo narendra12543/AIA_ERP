@@ -20,6 +20,7 @@ import {
   BadgeIndianRupee,
   Bell,
   UserCircle,
+  ShoppingCart,
 } from "lucide-react";
 import { User } from "../lib/types";
 import { hasPermission, normalizeRole } from "../lib/permissions";
@@ -29,7 +30,7 @@ import { Sheet, SheetContent } from "./ui/sheet";
 import { Separator } from "./ui/separator";
 import { Badge } from "./ui/badge";
 
-export type AppView = "overview" | "quotation" | "mail" | "settings" | "finance" | "staff_portal";
+export type AppView = "overview" | "quotation" | "purchase_orders" | "mail" | "settings" | "finance" | "staff_portal";
 
 interface SidebarProps {
   currentView: AppView;
@@ -68,7 +69,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const isDark = theme === "dark";
   const canonicalRole = normalizeRole(currentUser?.role);
-  const isStaffOnly = canonicalRole === "Staff";
+  const isStaffOnly = canonicalRole === "Staff" || canonicalRole === "Store";
   const canManageUsers = hasPermission(currentUser, "users.manage");
   const canViewAuditLogs = hasPermission(currentUser, "audit_logs.view");
   const canViewVendors = hasPermission(currentUser, "vendors.view");
@@ -76,6 +77,11 @@ export default function Sidebar({
   const canViewQuotations =
     hasPermission(currentUser, "quotations.view_all") ||
     hasPermission(currentUser, "quotations.view_own");
+  const canViewPurchaseOrders =
+    hasPermission(currentUser, "purchase_order.create") ||
+    hasPermission(currentUser, "purchase_order.view_all") ||
+    hasPermission(currentUser, "purchase_order.view_own") ||
+    hasPermission(currentUser, "purchase_order.approve");
   const canUseMail =
     hasPermission(currentUser, "mail.send") || hasPermission(currentUser, "mail.view");
   const canViewFinance =
@@ -219,7 +225,7 @@ export default function Sidebar({
           <nav className="px-2.5 py-4 space-y-1" aria-label="Primary Workspace Navigation">
             {!isCollapsed && (
               <p className={`px-3 text-[10px] font-bold tracking-wider uppercase mb-2 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-                {isStaffOnly ? "Staff Portal" : "Workspace"}
+                {isStaffOnly ? (canonicalRole === "Store" ? "Store Portal" : "Staff Portal") : "Workspace"}
               </p>
             )}
 
@@ -267,6 +273,15 @@ export default function Sidebar({
                   onClick={() => handleStaffNav("profile")}
                   isCollapsed={isCollapsed}
                 />
+                {canUseMail && (
+                  <NavItem
+                    label="Mail Center"
+                    icon={<Mail className="w-4 h-4" />}
+                    active={currentView === "mail"}
+                    onClick={() => handleNav("mail")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
               </>
             ) : (
               <>
@@ -286,6 +301,16 @@ export default function Sidebar({
                     icon={<FileText className="w-4 h-4" />}
                     active={currentView === "quotation"}
                     onClick={() => handleNav("quotation")}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
+
+                {canViewPurchaseOrders && (
+                  <NavItem
+                    label="Purchase Orders"
+                    icon={<ShoppingCart className="w-4 h-4" />}
+                    active={currentView === "purchase_orders"}
+                    onClick={() => handleNav("purchase_orders")}
                     isCollapsed={isCollapsed}
                   />
                 )}

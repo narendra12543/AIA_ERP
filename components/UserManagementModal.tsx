@@ -43,7 +43,7 @@ export default function UserManagementModal({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"Admin" | "Sales" | "Accounts" | "Staff">("Staff");
+  const [role, setRole] = useState<"Admin" | "Sales" | "Accounts" | "Purchase" | "Store" | "Staff">("Staff");
   const [designation, setDesignation] = useState("");
   const [department, setDepartment] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
@@ -357,13 +357,15 @@ export default function UserManagementModal({
                   <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Role</label>
                   <select
                     value={role}
-                    onChange={(e) => setRole(e.target.value as "Admin" | "Sales" | "Accounts" | "Staff")}
+                    onChange={(e) => setRole(e.target.value as "Admin" | "Sales" | "Accounts" | "Purchase" | "Store" | "Staff")}
                     className="w-full bg-black border border-zinc-700 rounded px-2.5 py-2 text-white"
                   >
-                    <option value="Staff">Staff (Staff Portal &amp; Own Expenses)</option>
-                    <option value="Sales">Sales (Quotations, Mail &amp; Own Expenses)</option>
-                    <option value="Accounts">Accounts (Finance, Approvals &amp; Reports)</option>
-                    <option value="Admin">Admin (Full Enterprise Access)</option>
+                    <option value="Admin">Admin — Full Enterprise Access</option>
+                    <option value="Sales">Sales — Quotations &amp; Common Access</option>
+                    <option value="Accounts">Accounts — Finance, Reports &amp; Common Access</option>
+                    <option value="Purchase">Purchase — Purchase Orders &amp; Common Access</option>
+                    <option value="Store">Store — Common Access</option>
+                    <option value="Staff">Staff — Staff Portal &amp; Common Access</option>
                   </select>
                 </div>
                 <div>
@@ -609,10 +611,14 @@ export default function UserManagementModal({
                         className="bg-black border border-zinc-700 rounded px-2 py-1 text-[11px] font-semibold text-white cursor-pointer"
                       >
                         <option value="Admin">Admin</option>
+                        <option value="Sales">Sales</option>
+                        <option value="Accounts">Accounts</option>
+                        <option value="Purchase">Purchase</option>
+                        <option value="Store">Store</option>
                         <option value="Staff">Staff</option>
                       </select>
 
-                      {canonRole === "Staff" && (
+                      {canonRole !== "Admin" && (
                         <button
                           type="button"
                           onClick={() => openPermEditor(u)}

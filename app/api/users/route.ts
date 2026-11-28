@@ -263,7 +263,23 @@ export async function PUT(req: NextRequest) {
 
     if (role) {
       const canonicalRole = normalizeRole(role);
-      await query(`UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`, [canonicalRole, id]);
+      if (normalizeRole(target.role) === "Admin" && canonicalRole !== "Admin") {
+        const adminCnt = await query(
+          `SELECT COUNT(*)::int AS cnt FROM users WHERE LOWER(role) = 'admin' AND status = 'active' AND id <> $1`,
+          [id]
+        );
+        if (Number(adminCnt?.rows[0]?.cnt || 0) === 0) {
+          return NextResponse.json(
+            { error: "Cannot change role of the last active Administrator." },
+            { status: 400 }
+          );
+        }
+      }
+      await query(
+        `UPDATE users SET role = $1, permissions = NULL, updated_at = NOW() WHERE id = $2`,
+        [canonicalRole, id]
+      );
+      await revokeAllUserSessions(id);
       await logAudit(
         admin.userId,
         "ROLE_CHANGED",

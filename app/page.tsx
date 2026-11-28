@@ -14,6 +14,7 @@ import MailCenter, { MailComposeSeed } from "../components/MailCenter";
 import AdminSettingsView from "../components/AdminSettingsView";
 import FinanceOperationsView from "../components/FinanceOperationsView";
 import StaffPortalView, { StaffPortalTab } from "../components/StaffPortalView";
+import PurchaseOrdersWorkspace from "../components/PurchaseOrdersWorkspace";
 import { FinancialYearProvider } from "../contexts/FinancialYearContext";
 import Page1Technical from "../components/Page1Technical";
 import CommercialOffer from "../components/CommercialOffer";
@@ -21,7 +22,7 @@ import ProformaInvoice from "../components/ProformaInvoice";
 import TaxInvoice from "../components/TaxInvoice";
 import PurchaseOrderComponent from "../components/PurchaseOrder";
 import LoginScreen from "../components/LoginScreen";
-import { CompanyInfo, Quotation, SpecProfile, User, Vendor } from "../lib/types";
+import { CompanyInfo, PurchaseOrder as POType, Quotation, SpecProfile, User, Vendor } from "../lib/types";
 import { hasPermission, normalizeRole } from "../lib/permissions";
 import { initialData } from "../lib/mock-data";
 import { initialVendors } from "../lib/sample-data";
@@ -34,14 +35,16 @@ import {
   nextQuotationNo,
   nextPINumber,
   nextTaxInvoiceNumber,
+  nextPONumber,
   createRevision,
 } from "../lib/vba-engine";
 import { exportElementsToPdf } from "../lib/pdf-export";
 
 function defaultViewForRole(user: User | null): AppView {
   const r = normalizeRole(user?.role);
-  if (r === "Staff") return "staff_portal";
+  if (r === "Staff" || r === "Store") return "staff_portal";
   if (r === "Accounts") return "finance";
+  if (r === "Purchase") return "purchase_orders";
   if (r === "Sales") return "quotation";
   return "overview";
 }
@@ -76,46 +79,79 @@ export default function Home() {
   // Dedicated PO Vendors state - strictly separated from customer/client database
   const [vendors, setVendors] = useState<Vendor[]>(initialData.vendors || initialVendors);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
+  const [workspacePoData, setWorkspacePoData] = useState<POType>({
+    id: `po_${Date.now()}`,
+    po_number: nextPONumber([]),
+    po_date: new Date().toISOString().slice(0, 10),
+    vendor_id: "",
+    vendor_name: "",
+    vendor_address: "",
+    vendor_gstin: "",
+    items: [
+      {
+        id: `po_item_${Date.now()}`,
+        name: "",
+        hsn: "",
+        size: "",
+        qty: 1,
+        unit: "No",
+        price: 0,
+        amount: 0,
+      },
+    ],
+    subtotal: 0,
+    tax_rate: 0.18,
+    tax_amount: 0,
+    round_off: 0,
+    total: 0,
+    status: "Draft",
+  });
 
   // PDF Export Status
   const [exportStatus, setExportStatus] = useState<string>("");
 
-  // Helper to load persistent records from API with tab-scoped token
+  // Helper to load persistent records from API with tab-scoped token (parallelized)
   async function loadPersistentData(token?: string) {
     const headers: HeadersInit = token ? { "x-tab-session": token } : {};
 
-    try {
-      const qRes = await fetch("/api/quotes", { headers });
-      if (qRes.ok) {
-        const qData = await qRes.json();
-        if (Array.isArray(qData) && qData.length > 0) {
-          setQuotations(qData);
-          setCurrentQuote(qData[0]);
+    await Promise.allSettled([
+      (async () => {
+        try {
+          const qRes = await fetch("/api/quotes", { headers });
+          if (qRes.ok) {
+            const qData = await qRes.json();
+            if (Array.isArray(qData) && qData.length > 0) {
+              setQuotations(qData);
+              setCurrentQuote(qData[0]);
+            }
+          }
+        } catch (e) {
+          console.warn("Could not load quotes from API", e);
         }
-      }
-    } catch (e) {
-      console.warn("Could not load quotes from API", e);
-    }
-
-    try {
-      const cRes = await fetch("/api/company", { headers });
-      if (cRes.ok) {
-        const cData = await cRes.json();
-        if (cData && cData.name) setCompany(cData);
-      }
-    } catch (e) {
-      console.warn("Could not load company from API", e);
-    }
-
-    try {
-      const vRes = await fetch("/api/vendors", { headers });
-      if (vRes.ok) {
-        const vData = await vRes.json();
-        if (Array.isArray(vData) && vData.length > 0) setVendors(vData);
-      }
-    } catch (e) {
-      console.warn("Could not load vendors from API", e);
-    }
+      })(),
+      (async () => {
+        try {
+          const cRes = await fetch("/api/company", { headers });
+          if (cRes.ok) {
+            const cData = await cRes.json();
+            if (cData && cData.name) setCompany(cData);
+          }
+        } catch (e) {
+          console.warn("Could not load company from API", e);
+        }
+      })(),
+      (async () => {
+        try {
+          const vRes = await fetch("/api/vendors", { headers });
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            if (Array.isArray(vData) && vData.length > 0) setVendors(vData);
+          }
+        } catch (e) {
+          console.warn("Could not load vendors from API", e);
+        }
+      })(),
+    ]);
 
     try {
       const sRes = await fetch("/api/spec-profiles", { headers });
@@ -500,8 +536,12 @@ export default function Home() {
   }
 
   // 4. Export Official 1-Page Purchase Order (PO) PDF
-  async function handleExportPurchaseOrder() {
-    const fileName = buildPOPdfName("PO-2026-011", currentQuote.date);
+  async function handleExportPurchaseOrder(poOverride?: POType) {
+    const activePo = poOverride || (effectiveView === "purchase_orders" ? workspacePoData : null);
+    const fileName = buildPOPdfName(
+      activePo?.po_number || "PO-2026-011",
+      activePo?.po_date || currentQuote.date
+    );
     const po = document.getElementById("export_po");
     if (!po) {
       console.error("PO element not found in DOM");
@@ -735,9 +775,30 @@ export default function Home() {
     hasPermission(currentUser, "finance.dashboard") ||
     hasPermission(currentUser, "finance.orders") ||
     hasPermission(currentUser, "expenses.view");
+  const canViewOverview = hasPermission(currentUser, "overview.view");
+  const canViewQuotations =
+    hasPermission(currentUser, "quotations.view_all") ||
+    hasPermission(currentUser, "quotations.view_own");
+  const canViewPurchaseOrders =
+    canonicalRole === "Admin" ||
+    hasPermission(currentUser, "purchase_order.create") ||
+    hasPermission(currentUser, "purchase_order.view_all") ||
+    hasPermission(currentUser, "purchase_order.view_own") ||
+    hasPermission(currentUser, "purchase_order.approve");
+  const canUseMail =
+    hasPermission(currentUser, "mail.view") || hasPermission(currentUser, "mail.send");
+
   const effectiveView: AppView =
-    canonicalRole === "Staff"
+    currentView === "mail" && canUseMail
+      ? "mail"
+      : canonicalRole === "Staff" || canonicalRole === "Store"
       ? "staff_portal"
+      : currentView === "overview" && !canViewOverview
+      ? defaultViewForRole(currentUser)
+      : currentView === "quotation" && !canViewQuotations
+      ? defaultViewForRole(currentUser)
+      : currentView === "purchase_orders" && !canViewPurchaseOrders
+      ? defaultViewForRole(currentUser)
       : currentView === "finance" && !canViewFinance
       ? defaultViewForRole(currentUser)
       : currentView === "settings" && canonicalRole !== "Admin"
@@ -831,10 +892,12 @@ export default function Home() {
             title={
               effectiveView === "overview"
                 ? "Overview"
+                : effectiveView === "purchase_orders"
+                ? "Purchase Orders"
                 : effectiveView === "finance"
                 ? "Finance & Operations"
                 : effectiveView === "staff_portal"
-                ? "Staff Portal"
+                ? canonicalRole === "Store" ? "Store Portal" : "Staff Portal"
                 : effectiveView === "mail"
                 ? "Zoho Mail Center"
                 : effectiveView === "settings"
@@ -844,6 +907,8 @@ export default function Home() {
             subtitle={
               effectiveView === "overview"
                 ? "Executive summary & all quotations"
+                : effectiveView === "purchase_orders"
+                ? "Supplier Purchase Orders, drafts & Admin approval workflow"
                 : effectiveView === "finance"
                 ? "Orders, receivables, expenses, reimbursements & reports"
                 : effectiveView === "staff_portal"
@@ -926,6 +991,7 @@ export default function Home() {
                 }}
                 onOpenVendorModal={() => setIsVendorModalOpen(true)}
                 onNavigateFinance={canViewFinance ? () => setCurrentView("finance") : undefined}
+                onOpenPurchaseOrders={canViewPurchaseOrders ? () => setCurrentView("purchase_orders") : undefined}
                 onPrintQuotation={(q) => {
                   setCurrentQuote(q);
                   setTimeout(() => handleExportQuotation(), 100);
@@ -936,6 +1002,35 @@ export default function Home() {
                   const rawPhone = (q.client_contact || "").replace(/[^0-9]/g, "");
                   const phone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
                   window.open(`https://web.whatsapp.com/send?phone=${phone}&text=Quotation%20${encodeURIComponent(q.quotation_no)}`, "_blank");
+                }}
+              />
+            </div>
+          ) : effectiveView === "purchase_orders" && canViewPurchaseOrders ? (
+            <div className="w-full flex-1">
+              <PurchaseOrdersWorkspace
+                theme={theme}
+                company={company}
+                vendors={vendors}
+                allQuotations={quotations}
+                currentQuote={currentQuote}
+                poData={workspacePoData}
+                setPoData={setWorkspacePoData}
+                currentUser={currentUser}
+                onOpenVendorModal={() => setIsVendorModalOpen(true)}
+                onPrintPo={(po) => {
+                  setWorkspacePoData(po);
+                  setTimeout(() => handleExportPurchaseOrder(po), 80);
+                }}
+                onEmailPo={(po) => {
+                  setWorkspacePoData(po);
+                  setMailSeed({
+                    to: po.vendor_email || "",
+                    subject: `Purchase Order ${po.po_number} - ${company.name}`,
+                    bodyHtml: `<p>Dear ${po.vendor_name || "Vendor"},</p><p>Please find attached Purchase Order <strong>${po.po_number}</strong>.</p>`,
+                    documentType: "Purchase Order",
+                    autoAttachDoc: "po",
+                  });
+                  setCurrentView("mail");
                 }}
               />
             </div>
@@ -1112,19 +1207,23 @@ export default function Home() {
         {/* 4. Official 1-Page Purchase Order */}
         <div id="export_po">
           <PurchaseOrderComponent
-            po={{
-              po_number: "PO-2026-011",
-              po_date: currentQuote.date,
-              vendor_name: vendors[0]?.name || "Precision Steels & Tubes LLP",
-              vendor_address: vendors[0]?.address || "Plot No. 45, PCNTDA Bhosari, Pune - 411026",
-              vendor_gstin: vendors[0]?.gstin || "27AAACP1234F1Z8",
-              items: currentQuote.items,
-              subtotal: currentQuote.subtotal,
-              tax_rate: 0.18,
-              tax_amount: currentQuote.tax_amount,
-              total: currentQuote.total,
-              terms: currentQuote.terms,
-            }}
+            po={
+              effectiveView === "purchase_orders"
+                ? workspacePoData
+                : {
+                    po_number: "PO-2026-011",
+                    po_date: currentQuote.date,
+                    vendor_name: vendors[0]?.name || "Precision Steels & Tubes LLP",
+                    vendor_address: vendors[0]?.address || "Plot No. 45, PCNTDA Bhosari, Pune - 411026",
+                    vendor_gstin: vendors[0]?.gstin || "27AAACP1234F1Z8",
+                    items: currentQuote.items,
+                    subtotal: currentQuote.subtotal,
+                    tax_rate: 0.18,
+                    tax_amount: currentQuote.tax_amount,
+                    total: currentQuote.total,
+                    terms: currentQuote.terms,
+                  }
+            }
             company={company}
           />
         </div>

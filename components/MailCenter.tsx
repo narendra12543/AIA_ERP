@@ -66,6 +66,9 @@ import {
 } from "lucide-react";
 import { useFinancialYear } from "../contexts/FinancialYearContext";
 import { matchesReportingFY } from "../lib/financial-year";
+import ZohoMailboxWorkspace from "./ZohoMailboxWorkspace";
+import SignatureGeneratorPanel from "./SignatureGeneratorPanel";
+import { resolveSignaturePlaceholders } from "../lib/signature-templates";
 
 const FontSizeTextStyle = TextStyle.extend({
   addAttributes() {
@@ -199,7 +202,6 @@ export default function MailCenter({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showCc, setShowCc] = useState(true);
   const [showBcc, setShowBcc] = useState(false);
-  const [testingSmtp, setTestingSmtp] = useState(false);
   const [showMoreTools, setShowMoreTools] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [dragOverAttach, setDragOverAttach] = useState(false);
@@ -248,12 +250,50 @@ export default function MailCenter({
 
   // AI Assistant state
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const [lastAiMode, setLastAiMode] = useState<
+    | "professional"
+    | "grammar"
+    | "improve"
+    | "formal"
+    | "concise"
+    | "polite"
+    | "clear"
+    | "followup"
+    | "marathi_en"
+    | "hindi_en"
+  >("professional");
+
+  // Multi-account Zoho Mailbox state
+  const [mailboxes, setMailboxes] = useState<any[]>([]);
+  const [activeMailbox, setActiveMailbox] = useState<any | null>(null);
+  const [composeMode, setComposeMode] = useState<"new" | "reply" | "replyAll" | "forward">("new");
+  const [replyMeta, setReplyMeta] = useState<{ originalMessageId?: string; inReplyTo?: string }>({});
+
+  useEffect(() => {
+    fetch("/api/mail/accounts", { cache: "no-store", headers: getAuthHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && Array.isArray(j.mailboxes)) {
+          setMailboxes(j.mailboxes);
+          setActiveMailbox((prev: any) =>
+            j.mailboxes.find((m: any) => m.id === prev?.id) ||
+            j.mailboxes.find((m: any) => m.is_default) ||
+            j.mailboxes[0] ||
+            null
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [aiDiff, setAiDiff] = useState<{
     originalHtml: string;
     originalText: string;
     improvedText: string;
     providerUsed: string;
     mode: string;
+    selectionFrom?: number;
+    selectionTo?: number;
   } | null>(null);
   const [lastPreAiHtml, setLastPreAiHtml] = useState<string | null>(null);
 
@@ -275,8 +315,13 @@ export default function MailCenter({
 
   const activeSignatureHtml = useMemo(() => {
     if (!includeSignature || !activeSignature) return "";
-    return customSigOverrideHtml !== null ? customSigOverrideHtml : activeSignature.html_content || "";
-  }, [includeSignature, activeSignature, customSigOverrideHtml]);
+    const raw = customSigOverrideHtml !== null ? customSigOverrideHtml : activeSignature.html_content || "";
+    return resolveSignaturePlaceholders(raw, {
+      email: activeMailbox?.email_address || zohoStatus?.senderEmail || "sales@avenautomation.in",
+      name: currentUser?.name,
+      companyName: company?.name || "Aven Industrial Automation",
+    });
+  }, [includeSignature, activeSignature, customSigOverrideHtml, activeMailbox?.email_address, zohoStatus?.senderEmail, currentUser?.name, company?.name]);
 
   const editor = useEditor({
     extensions: [
@@ -521,10 +566,10 @@ export default function MailCenter({
         setStatusBanner({ type: "error", text: `Blocked unsafe file type: ${file.name}` });
         return;
       }
-      if (file.size > 4 * 1024 * 1024) {
+      if (file.size > 3 * 1024 * 1024) {
         setStatusBanner({
           type: "error",
-          text: `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) exceeds the 4 MB serverless upload cap (with Base64 overhead).`,
+          text: `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) exceeds the 3 MB attachment limit (4.5 MB Vercel serverless payload cap with Base64 encoding).`,
         });
         return;
       }
@@ -570,30 +615,6 @@ export default function MailCenter({
     e.target.value = "";
   }
 
-  async function handleTestSmtp() {
-    if (!canEditSettings || testingSmtp) return;
-    setTestingSmtp(true);
-    setStatusBanner(null);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ action: "test_smtp" }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        setStatusBanner({ type: "success", text: data.message || "Zoho SMTP verified successfully." });
-      } else {
-        setStatusBanner({ type: "error", text: data.error || "SMTP verification failed." });
-      }
-      await fetchMailData();
-    } catch {
-      setStatusBanner({ type: "error", text: "Network error while testing SMTP." });
-    } finally {
-      setTestingSmtp(false);
-    }
-  }
-
   function downloadAttachment(att: PendingAttachment) {
     const link = document.createElement("a");
     link.href = `data:${att.contentType};base64,${att.base64}`;
@@ -620,7 +641,7 @@ export default function MailCenter({
   }
 
   async function handleSendEmail() {
-    if (!canSend || !editor) return;
+    if (!canSend || !editor || sending) return;
     setStatusBanner(null);
 
     const allRecipients = [...toChips, ...parseEmailList(toInput)];
@@ -632,10 +653,20 @@ export default function MailCenter({
       setStatusBanner({ type: "error", text: "Email subject is required." });
       return;
     }
+    if (!activeMailbox?.id || activeMailbox?.connection_status !== "Connected") {
+      setStatusBanner({
+        type: "error",
+        text: "No connected Zoho Mail account selected. Connect a Zoho OAuth mailbox in Admin Settings → Mail Accounts.",
+      });
+      return;
+    }
 
     const totalBytes = attachments.reduce((s, a) => s + a.sizeBytes, 0);
-    if (totalBytes > 12 * 1024 * 1024) {
-      setStatusBanner({ type: "error", text: "Total attachment size exceeds 12 MB limit." });
+    if (totalBytes > 3 * 1024 * 1024) {
+      setStatusBanner({
+        type: "error",
+        text: "Total attachment size exceeds the 3 MB raw limit (required to stay within Vercel's 4.5 MB serverless request cap after Base64 encoding).",
+      });
       return;
     }
 
@@ -650,11 +681,14 @@ export default function MailCenter({
 
     setSending(true);
     try {
-      const res = await fetch("/api/mail", {
+      const res = await fetch("/api/mail/messages", {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          draft_id: draftId,
+          mailboxId: activeMailbox.id,
+          mode: composeMode,
+          originalMessageId: replyMeta.originalMessageId,
+          inReplyTo: replyMeta.inReplyTo,
           quotation_no: documentType === "General" ? null : selectedQuoteNo || null,
           document_type: documentType,
           to: allRecipients,
@@ -671,11 +705,16 @@ export default function MailCenter({
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatusBanner({ type: "error", text: data.error || "SMTP delivery failed." });
+        setStatusBanner({ type: "error", text: data.error || "Email delivery failed." });
         return;
       }
-      setStatusBanner({ type: "success", text: "Email sent successfully via Zoho Mail!" });
+      setStatusBanner({
+        type: "success",
+        text: `Email sent successfully via Zoho Mail API (${activeMailbox.email_address})!`,
+      });
       setDraftId(null);
+      setComposeMode("new");
+      setReplyMeta({});
       setAttachments([]);
       setBodyDirty(false);
       await fetchMailData();
@@ -735,11 +774,27 @@ export default function MailCenter({
   }
 
   async function handleAiAssist(
-    mode: "grammar" | "professional" | "formal" | "concise" | "polite" | "followup" | "translate_en"
+    mode:
+      | "professional"
+      | "grammar"
+      | "improve"
+      | "formal"
+      | "concise"
+      | "polite"
+      | "clear"
+      | "followup"
+      | "marathi_en"
+      | "hindi_en"
   ) {
-    if (!canUseAi || !editor) return;
+    if (!canUseAi || !editor || aiLoading) return;
+    setAiMenuOpen(false);
+    setLastAiMode(mode);
+
+    const { from, to, empty } = editor.state.selection;
+    const selectedText = !empty ? editor.state.doc.textBetween(from, to, "\n").trim() : "";
     const originalHtml = editor.getHTML();
-    const originalText = stripHtmlToText(originalHtml);
+    const originalText = selectedText || stripHtmlToText(originalHtml);
+
     setAiLoading(true);
     setStatusBanner(null);
     try {
@@ -750,7 +805,7 @@ export default function MailCenter({
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatusBanner({ type: "error", text: data.error || "AI assist failed." });
+        setStatusBanner({ type: "error", text: data.error || "AI Polish failed." });
         return;
       }
       setAiDiff({
@@ -759,9 +814,11 @@ export default function MailCenter({
         improvedText: data.improvedText,
         providerUsed: data.providerUsed,
         mode,
+        selectionFrom: selectedText ? from : undefined,
+        selectionTo: selectedText ? to : undefined,
       });
     } catch {
-      setStatusBanner({ type: "error", text: "AI Assistant request failed." });
+      setStatusBanner({ type: "error", text: "AI Polish request failed." });
     } finally {
       setAiLoading(false);
     }
@@ -770,11 +827,19 @@ export default function MailCenter({
   function acceptAiSuggestion() {
     if (!aiDiff || !editor) return;
     setLastPreAiHtml(aiDiff.originalHtml);
-    const paragraphs = aiDiff.improvedText
-      .split(/\n{2,}/)
-      .map((p) => `<p>${p.replace(/\n/g, "<br/>")}</p>`)
-      .join("");
-    editor.commands.setContent(paragraphs);
+    if (typeof aiDiff.selectionFrom === "number" && typeof aiDiff.selectionTo === "number") {
+      editor
+        .chain()
+        .focus()
+        .insertContentAt({ from: aiDiff.selectionFrom, to: aiDiff.selectionTo }, aiDiff.improvedText)
+        .run();
+    } else {
+      const paragraphs = aiDiff.improvedText
+        .split(/\n{2,}/)
+        .map((p) => `<p>${p.replace(/\n/g, "<br/>")}</p>`)
+        .join("");
+      editor.commands.setContent(paragraphs);
+    }
     setAiDiff(null);
   }
 
@@ -866,55 +931,24 @@ export default function MailCenter({
           <div className="min-w-0">
             <h2 className="text-base font-bold truncate">AVEN Mail Center</h2>
             <p className={`text-xs truncate ${isDark ? "text-zinc-400" : "text-slate-500"}`}>
-              {zohoStatus?.configured
-                ? `Sender: ${zohoStatus.fromName} <${zohoStatus.senderEmail}> (${zohoStatus.host}:${zohoStatus.port})`
-                : "SMTP pending configuration"}
+              {activeMailbox?.connection_status === "Connected"
+                ? `Active Zoho Mailbox: ${activeMailbox.display_name} <${activeMailbox.email_address}>`
+                : "Multi-Account Zoho Mail Workspace · Connect a Zoho OAuth mailbox"}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {(() => {
-            const label = !zohoStatus
-              ? "Checking SMTP..."
-              : zohoStatus.enabled === false
-              ? "SMTP Disabled"
-              : !zohoStatus.configured
-              ? "Not Configured"
-              : zohoStatus.lastTestResult === "success"
-              ? "Connected"
-              : zohoStatus.lastTestResult === "failed"
-              ? "Authentication / Connection Failed"
-              : "Configuration Available — Not Tested";
-            const badgeCls =
-              label === "Connected"
+          <span
+            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+              activeMailbox?.connection_status === "Connected"
                 ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                : label === "Configuration Available — Not Tested"
-                ? "bg-sky-500/15 text-sky-400 border-sky-500/30"
-                : label === "Authentication / Connection Failed"
-                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
-                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
-            return (
-              <span
-                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}
-                title={zohoStatus?.lastTestError || undefined}
-              >
-                {label}
-              </span>
-            );
-          })()}
-          {canEditSettings && (
-            <button
-              type="button"
-              onClick={handleTestSmtp}
-              disabled={testingSmtp}
-              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
-                isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
-              }`}
-              title="Verify SMTP connection & credentials without sending an email"
-            >
-              {testingSmtp ? "Testing..." : "Test SMTP"}
-            </button>
-          )}
+                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+            }`}
+          >
+            {activeMailbox?.connection_status === "Connected"
+              ? "Zoho OAuth Connected"
+              : "Mailbox Not Connected"}
+          </span>
           {canEditSettings && onOpenAdminSettings && (
             <button
               onClick={onOpenAdminSettings}
@@ -922,7 +956,7 @@ export default function MailCenter({
                 isDark ? "border-zinc-700 hover:bg-zinc-800" : "border-slate-300 hover:bg-slate-100"
               }`}
             >
-              Email Configuration
+              Manage Mail Accounts
             </button>
           )}
           <button
@@ -1126,9 +1160,30 @@ export default function MailCenter({
               {/* From */}
               <div className="flex items-center px-3 py-2 gap-3 text-xs">
                 <span className="w-14 shrink-0 font-semibold opacity-65">From</span>
-                <span className="truncate font-medium">
-                  {zohoStatus?.fromName || "AVEN Industrial Automation"} &lt;{zohoStatus?.senderEmail || "sales@avenautomation.in"}&gt;
-                </span>
+                {mailboxes.length > 0 ? (
+                  <select
+                    aria-label="Sending Mailbox"
+                    value={activeMailbox?.id || ""}
+                    onChange={(e) => {
+                      if (bodyDirty && !window.confirm("Switch sending mailbox? Unsaved compose changes will remain in the editor.")) {
+                        return;
+                      }
+                      const found = mailboxes.find((m) => m.id === e.target.value);
+                      if (found) setActiveMailbox(found);
+                    }}
+                    className={`px-2 py-1 rounded border text-xs font-medium ${inputCls}`}
+                  >
+                    {mailboxes.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.display_name} &lt;{m.email_address}&gt; ({m.connection_status})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="truncate font-medium text-amber-400">
+                    No Zoho OAuth mailbox connected — ask Admin to connect one in Admin Settings
+                  </span>
+                )}
               </div>
 
               {/* To (Chips + Searchable Picker + CC/BCC toggles) */}
@@ -1452,35 +1507,70 @@ export default function MailCenter({
                 )}
 
                 {canUseAi && aiEnabled && (
-                  <div className="flex flex-wrap items-center gap-1 ml-auto pl-2 border-l border-zinc-700/50">
-                    <span className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 mr-1">
-                      <Sparkles className="w-3 h-3" /> AI:
-                    </span>
-                    {(
-                      [
-                        ["grammar", "Grammar"],
-                        ["professional", "Professional"],
-                        ["formal", "Formal"],
-                        ["concise", "Concise"],
-                        ["polite", "Polite"],
-                        ["followup", "Follow-Up"],
-                        ["translate_en", "MR/HI → EN"],
-                      ] as const
-                    ).map(([mode, label]) => (
+                  <div className="relative flex items-center gap-1 ml-auto pl-2 border-l border-zinc-700/50">
+                    <div className="inline-flex items-stretch rounded-lg overflow-hidden border border-indigo-500/30">
                       <button
-                        key={mode}
                         type="button"
                         disabled={aiLoading}
-                        onClick={() => handleAiAssist(mode)}
-                        className={`px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                        onClick={() => handleAiAssist(lastAiMode)}
+                        className={`px-2.5 py-1 text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60 ${
                           isDark
-                            ? "bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/30"
+                            ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/35"
+                            : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                        }`}
+                        title="Polish selected text or full email body"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        {aiLoading ? "Polishing..." : "AI Polish"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={aiLoading}
+                        onClick={() => setAiMenuOpen((v) => !v)}
+                        aria-label="Choose AI Polish action"
+                        className={`px-1.5 py-1 border-l border-indigo-500/30 cursor-pointer transition-colors disabled:opacity-60 ${
+                          isDark
+                            ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/35"
                             : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
                         }`}
                       >
-                        {label}
+                        <ChevronDown className="w-3.5 h-3.5" />
                       </button>
-                    ))}
+                    </div>
+                    {aiMenuOpen && (
+                      <div
+                        className={`absolute right-0 top-full mt-1 z-30 w-56 rounded-lg border shadow-xl py-1 ${
+                          isDark ? "bg-zinc-950 border-zinc-700 text-zinc-100" : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      >
+                        {(
+                          [
+                            ["professional", "Professional Email"],
+                            ["grammar", "Correct Grammar & Spelling"],
+                            ["improve", "Improve Writing"],
+                            ["formal", "Make Formal"],
+                            ["concise", "Make Concise"],
+                            ["polite", "Make Polite"],
+                            ["clear", "Make More Clear"],
+                            ["followup", "Generate Follow-up"],
+                            ["marathi_en", "Marathi to English"],
+                            ["hindi_en", "Hindi to English"],
+                          ] as const
+                        ).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => handleAiAssist(mode)}
+                            className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between cursor-pointer ${
+                              isDark ? "hover:bg-zinc-800" : "hover:bg-slate-100"
+                            } ${lastAiMode === mode ? "font-semibold text-indigo-400" : ""}`}
+                          >
+                            <span>{label}</span>
+                            {lastAiMode === mode && <Check className="w-3 h-3" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {lastPreAiHtml && (
                       <button
                         type="button"
@@ -1569,6 +1659,14 @@ export default function MailCenter({
                     AI Suggestion Review ({aiDiff.mode} · {aiDiff.providerUsed})
                   </div>
                   <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={aiLoading}
+                      onClick={() => handleAiAssist(aiDiff.mode as any)}
+                      className="px-3 py-1 rounded-lg text-xs border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/20 cursor-pointer disabled:opacity-50"
+                    >
+                      {aiLoading ? "Polishing..." : "Retry"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setAiDiff(null)}
@@ -1702,46 +1800,31 @@ export default function MailCenter({
         </div>
       )}
 
-      {/* ZOHO INBOX TAB (Honest Free-Plan Capability View) */}
+      {/* ZOHO MULTI-ACCOUNT MAIL WORKSPACE */}
       {activeTab === "inbox" && (
-        <div className={`${cardCls} rounded-xl p-6 space-y-4`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/60 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center">
-                <Inbox className="w-5 h-5 text-sky-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold">Zoho Mail Inbox Integration</h3>
-                <p className="text-xs opacity-70">
-                  Account: {zohoStatus?.senderEmail || "sales@avenautomation.in"} • Plan Compatibility Check
-                </p>
-              </div>
-            </div>
-            <a
-              href="https://mail.zoho.in"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white"
-            >
-              <ExternalLink className="w-3.5 h-3.5" /> Open Zoho Webmail
-            </a>
-          </div>
-
-          <div className={`p-4 rounded-lg border text-xs space-y-2 ${isDark ? "bg-zinc-950/60 border-zinc-800" : "bg-slate-50 border-slate-200"}`}>
-            <div className="font-bold text-amber-400">
-              {zohoStatus?.oauthConfigured
-                ? "Zoho OAuth 2.0 Client Configured — Authorization Pending"
-                : "Zoho Mail Free Plan — IMAP/POP Blocked & OAuth Not Connected"}
-            </div>
-            <p className="opacity-80 leading-relaxed">
-              Zoho Mail&apos;s Forever Free Plan restricts third-party IMAP/POP client access, so this ERP will never display simulated or dummy incoming emails.
-              To synchronize live Inbox/Sent messages inside the ERP, configure a Zoho Mail OAuth 2.0 application (<code>ZOHO_OAUTH_CLIENT_ID</code> and <code>ZOHO_OAUTH_CLIENT_SECRET</code>) or use Zoho Webmail directly via the button above.
-            </p>
-            <div className="text-[11px] opacity-70">
-              ERP-composed drafts and sent emails remain safely stored under <strong>Drafts (ERP)</strong> and <strong>Sent (ERP)</strong>.
-            </div>
-          </div>
-        </div>
+        <ZohoMailboxWorkspace
+          theme={theme}
+          isAdmin={(currentUser.role || "").toLowerCase() === "admin"}
+          mailboxes={mailboxes}
+          activeMailbox={activeMailbox}
+          onSelectMailbox={(mbx) => {
+            if (bodyDirty && !window.confirm("Switch mailbox? You have unsaved compose text.")) return;
+            setActiveMailbox(mbx);
+          }}
+          onOpenAdminSettings={onOpenAdminSettings}
+          onComposeAction={(opts) => {
+            setComposeMode(opts.mode);
+            setReplyMeta({ originalMessageId: opts.originalMessageId, inReplyTo: opts.inReplyTo });
+            if (opts.to) setToChips(parseEmailList(opts.to));
+            else if (opts.mode === "new") setToChips([]);
+            if (opts.cc) setCcEmails(opts.cc);
+            if (opts.subject !== undefined) setSubject(opts.subject);
+            if (opts.bodyHtml !== undefined && editor) {
+              editor.commands.setContent(opts.bodyHtml);
+            }
+            setActiveTab("compose");
+          }}
+        />
       )}
 
       {/* DRAFTS TAB */}
@@ -1945,137 +2028,15 @@ export default function MailCenter({
         </div>
       )}
 
-      {/* SIGNATURES TAB */}
+      {/* DYNAMIC SIGNATURE GENERATOR & MANAGEMENT */}
       {activeTab === "signatures" && (
-        <div className={`${cardCls} rounded-xl p-4 space-y-4`}>
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider opacity-75 flex items-center gap-2">
-              <PenTool className="w-4 h-4 text-emerald-500" /> Email Signature Management ({signatures.length})
-            </h3>
-            {canManageSignatures && (
-              <button
-                onClick={() =>
-                  setEditingSig({
-                    name: "",
-                    font_family: "Verdana",
-                    font_size: "10pt",
-                    is_default: false,
-                    auto_insert: true,
-                    html_content: `<div style="font-family: Verdana, sans-serif; font-size: 10pt; color: #1f2937;"><p>Regards,</p><p><strong>Aven Industrial Automation</strong></p><p>📞 ${company.phone || "+91 8766918892"}<br/>📧 ${company.email || "sales@avenautomation.in"}<br/>🌐 ${company.website || "avenautomation.in"}</p></div>`,
-                  })
-                }
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer flex items-center gap-1"
-              >
-                <Plus className="w-3.5 h-3.5" /> New Signature
-              </button>
-            )}
-          </div>
-
-          {editingSig && (
-            <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "border-zinc-700 bg-zinc-900" : "border-slate-300 bg-slate-50"}`}>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  placeholder="Signature Name"
-                  value={editingSig.name || ""}
-                  onChange={(e) => setEditingSig({ ...editingSig, name: e.target.value })}
-                  className={`px-3 py-2 rounded-lg border text-xs ${inputCls}`}
-                />
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(editingSig.is_default)}
-                    onChange={(e) => setEditingSig({ ...editingSig, is_default: e.target.checked })}
-                  />
-                  Set as Default Signature
-                </label>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editingSig.auto_insert !== false}
-                    onChange={(e) => setEditingSig({ ...editingSig, auto_insert: e.target.checked })}
-                  />
-                  Auto-Insert in Compose
-                </label>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="px-3 py-1.5 rounded-lg border border-zinc-700 text-xs font-semibold cursor-pointer flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5" /> Upload / Replace Logo (Cloudinary)
-                  <input type="file" accept="image/png,image/jpeg" onChange={handleSignatureLogoUpload} className="hidden" />
-                </label>
-              </div>
-              <textarea
-                rows={5}
-                value={editingSig.html_content || ""}
-                onChange={(e) => setEditingSig({ ...editingSig, html_content: e.target.value })}
-                className={`w-full px-3 py-2 rounded-lg border text-xs font-mono ${inputCls}`}
-              />
-              <div className="p-3 rounded-lg bg-white text-zinc-900 border border-slate-200">
-                <div className="text-[10px] uppercase text-slate-400 font-bold mb-1">Live Preview</div>
-                <div dangerouslySetInnerHTML={{ __html: editingSig.html_content || "" }} />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setEditingSig(null)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-600 cursor-pointer">
-                  Cancel
-                </button>
-                <button onClick={saveSignature} className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white cursor-pointer">
-                  Save Signature
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {signatures.map((s) => (
-              <div key={s.id} className={`p-4 rounded-xl border space-y-3 ${isDark ? "border-zinc-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50"}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold">{s.name}</span>
-                    {s.is_default && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-1">
-                        <Star className="w-3 h-3" /> Default
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedSigId(s.id);
-                        setIncludeSignature(true);
-                        setActiveTab("compose");
-                      }}
-                      className="px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-600 text-white cursor-pointer"
-                    >
-                      Use
-                    </button>
-                    {canManageSignatures && (
-                      <button onClick={() => setEditingSig(s)} className="px-2.5 py-1 rounded text-[11px] border border-zinc-600 cursor-pointer">
-                        Edit
-                      </button>
-                    )}
-                    {canManageSignatures && s.id !== "sig_aven_default" && (
-                      <button
-                        onClick={async () => {
-                          await fetch(`/api/mail/signatures?id=${encodeURIComponent(s.id)}`, {
-                            method: "DELETE",
-                            headers: getAuthHeaders(),
-                          });
-                          await fetchMailData();
-                        }}
-                        className="p-1 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg bg-white text-zinc-900 border border-slate-200">
-                  <div dangerouslySetInnerHTML={{ __html: s.html_content }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <SignatureGeneratorPanel
+          theme={theme}
+          isAdmin={(currentUser.role || "").toLowerCase() === "admin"}
+          mailboxes={mailboxes}
+          activeMailboxId={activeMailbox?.id || ""}
+          onSaved={fetchMailData}
+        />
       )}
 
       {/* Email Preview Modal */}

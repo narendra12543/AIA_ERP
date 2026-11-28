@@ -10,10 +10,14 @@ import { getEffectiveAiConfig, EffectiveAiConfig } from "@/lib/settings-store";
 type AiMode =
   | "grammar"
   | "professional"
+  | "improve"
   | "formal"
   | "concise"
   | "polite"
+  | "clear"
   | "followup"
+  | "marathi_en"
+  | "hindi_en"
   | "translate_en";
 
 // Per-user in-memory rate limit + daily quota tracker
@@ -67,10 +71,14 @@ async function callGeminiFreeTier(
   const modePromptMap: Record<AiMode, string> = {
     grammar: "Fix all grammar, spelling, punctuation, and capitalization errors while keeping the original meaning and B2B tone.",
     professional: "Rewrite this B2B industrial engineering email so it is clear, crisp, and professionally worded.",
+    improve: "Improve the overall clarity, flow, and phrasing of this B2B email while preserving all facts and numbers.",
     formal: "Rewrite this email in a formal corporate tone suitable for senior procurement and engineering clients.",
     concise: "Make this email concise and direct while preserving all key details, dates, and action items.",
     polite: "Rewrite this email to sound warm, courteous, and customer-centric while remaining professional.",
+    clear: "Restructure and clarify this email so the key message, requirements, and next steps are unmistakable.",
     followup: "Generate a polite, action-oriented B2B follow-up email based on the provided notes or draft.",
+    marathi_en: "Translate this Marathi or mixed Marathi-English text into clear, professional B2B English.",
+    hindi_en: "Translate this Hindi or mixed Hindi-English text into clear, professional B2B English.",
     translate_en: "Translate any Marathi, Hindi, or mixed-language text into clear, professional B2B English.",
   };
 
@@ -168,7 +176,7 @@ function localRuleBasedTransform(mode: AiMode, text: string, contextSubject?: st
     .replace(/\s+([.,!?])/g, "$1")
     .replace(/(^|[.!?]\s+)([a-z])/g, (_, p1, p2) => `${p1}${p2.toUpperCase()}`);
 
-  if (mode === "translate_en") {
+  if (mode === "translate_en" || mode === "marathi_en" || mode === "hindi_en") {
     const phraseMap: Array<[RegExp, string]> = [
       [/namaskar|नमस्कार/gi, "Dear Sir/Madam,"],
       [/kripaya|कृपया/gi, "please"],
@@ -176,11 +184,22 @@ function localRuleBasedTransform(mode: AiMode, text: string, contextSubject?: st
       [/quotation pathavle ahe|quotation पाठवले आहे/gi, "We have shared the quotation for your review."],
       [/payment kela ahe|payment केले आहे/gi, "The payment has been processed."],
       [/bheja hai|भेजा है/gi, "has been sent."],
+      [/aapko|आपको/gi, "to you"],
+      [/humne|हमने/gi, "we have"],
+      [/bhej diya hai|भेज दिया है/gi, "have shared"],
     ];
     for (const [rx, rep] of phraseMap) {
       out = out.replace(rx, rep);
     }
     return out;
+  }
+
+  if (mode === "clear" || mode === "improve") {
+    const sentences = out
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return sentences.join("\n\n") || out;
   }
 
   if (mode === "followup") {
