@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   Trash2,
+  Upload,
 } from "lucide-react";
 import {
   generateSignatureHtml,
@@ -55,6 +56,7 @@ const DEFAULT_CFG: SignatureConfig = {
   textColor: "#1f2937",
   accentColor: "#d97706",
   logoSize: "md",
+  logoHeightPx: 64,
   logoAlignment: "left",
   dividerStyle: "solid",
   showSocialIcons: true,
@@ -88,7 +90,7 @@ export default function SignatureGeneratorPanel({
 
   // Preview controls
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
-  const [previewBg, setPreviewBg] = useState<"light" | "dark">("light");
+  const [previewBg, setPreviewBg] = useState<"light" | "dark">(theme);
   const [showHtml, setShowHtml] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -388,6 +390,92 @@ export default function SignatureGeneratorPanel({
             <input type="color" value={cfg.accentColor} onChange={(e) => setCfg({ ...cfg, accentColor: e.target.value })} className="w-full h-8 rounded border border-zinc-700 cursor-pointer" />
           </div>
           <div className="sm:col-span-2">
+            <label className={`block text-[10px] font-semibold mb-1 ${mutedCls}`}>Company Logo (Upload or URL)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-[11px] font-semibold cursor-pointer ${subCls}`}>
+                <Upload className="w-3.5 h-3.5 text-amber-400" />
+                <span>Upload Logo</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 1024 * 1024) {
+                      setNotice({ type: "err", text: "Logo file must be under 1 MB." });
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      const dataUrl = String(reader.result || "");
+                      try {
+                        const raw = sessionStorage.getItem("aven_tab_session");
+                        const tok = raw ? JSON.parse(raw)?.token : "";
+                        const res = await fetch("/api/upload", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(tok ? { "x-tab-session": tok } : {}),
+                          },
+                          body: JSON.stringify({ fileName: file.name, dataUrl }),
+                        });
+                        const j = await res.json().catch(() => ({}));
+                        if (res.ok && j.url && !String(j.url).startsWith("data:")) {
+                          setCfg((p) => ({ ...p, logoUrl: j.url }));
+                          setNotice({ type: "ok", text: "Logo uploaded successfully." });
+                          return;
+                        }
+                        setNotice({
+                          type: "err",
+                          text: j?.error || "Logo upload failed. Use Cloudinary-configured upload or a stable HTTPS logo URL.",
+                        });
+                      } catch {
+                        setNotice({
+                          type: "err",
+                          text: "Logo upload failed due to network error. Use a stable HTTPS logo URL.",
+                        });
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <input
+                value={cfg.logoUrl}
+                onChange={(e) => setCfg({ ...cfg, logoUrl: e.target.value })}
+                placeholder="/assets/logo.png or https://..."
+                className={`flex-1 min-w-[140px] px-2.5 py-1.5 rounded border ${inputCls}`}
+              />
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className={`text-[10px] font-semibold ${mutedCls}`}>Logo Size</label>
+              <span className="text-[11px] font-mono text-amber-400">{cfg.logoHeightPx || 64} px</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={32}
+                max={140}
+                step={2}
+                value={cfg.logoHeightPx || 64}
+                onChange={(e) => setCfg({ ...cfg, logoHeightPx: Number(e.target.value) })}
+                className="flex-1 accent-amber-500 cursor-pointer"
+              />
+              <input
+                type="number"
+                min={24}
+                max={160}
+                value={cfg.logoHeightPx || 64}
+                onChange={(e) => setCfg({ ...cfg, logoHeightPx: Math.max(24, Math.min(160, Number(e.target.value) || 64)) })}
+                className={`w-16 px-2 py-1 rounded border text-xs text-center ${inputCls}`}
+              />
+            </div>
+          </div>
+          <div className="sm:col-span-2">
             <label className={`block text-[10px] font-semibold mb-1 ${mutedCls}`}>Closing Message</label>
             <input value={cfg.closingMessage} onChange={(e) => setCfg({ ...cfg, closingMessage: e.target.value })} className={`w-full px-2.5 py-1.5 rounded border ${inputCls}`} />
           </div>
@@ -495,8 +583,27 @@ export default function SignatureGeneratorPanel({
         <div
           className={`p-4 rounded-lg border overflow-x-auto mx-auto transition-all ${
             previewDevice === "mobile" ? "max-w-[320px]" : "w-full"
-          } ${previewBg === "light" ? "bg-white text-zinc-900 border-zinc-200" : "bg-zinc-950 text-zinc-100 border-zinc-800"}`}
+          } ${
+            previewBg === "light"
+              ? "bg-white text-zinc-900 border-zinc-200"
+              : "aven-sig-preview-dark bg-[#0c0d10] text-white border-zinc-800"
+          }`}
         >
+          {previewBg === "dark" && (
+            <style>{`
+              .aven-sig-preview-dark,
+              .aven-sig-preview-dark p,
+              .aven-sig-preview-dark span,
+              .aven-sig-preview-dark td,
+              .aven-sig-preview-dark div,
+              .aven-sig-preview-dark strong {
+                color: #ffffff !important;
+              }
+              .aven-sig-preview-dark a {
+                color: #60a5fa !important;
+              }
+            `}</style>
+          )}
           {showHtml ? (
             <pre className="text-[10px] font-mono whitespace-pre-wrap break-all">{generatedHtml}</pre>
           ) : (

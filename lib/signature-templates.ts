@@ -31,6 +31,7 @@ export interface SignatureConfig {
   textColor: string;
   accentColor: string;
   logoSize: "sm" | "md" | "lg";
+  logoHeightPx?: number;
   logoAlignment: "left" | "top";
   dividerStyle: "solid" | "dashed" | "none";
   showSocialIcons: boolean;
@@ -72,7 +73,15 @@ export function resolveSignaturePlaceholders(html: string, context: { email?: st
 }
 
 export function generateSignatureHtml(cfg: SignatureConfig): string {
-  const logoH = cfg.logoSize === "sm" ? "34px" : cfg.logoSize === "lg" ? "58px" : "46px";
+  const customPx = Number(cfg.logoHeightPx || 0);
+  const logoH =
+    customPx >= 24 && customPx <= 160
+      ? `${Math.round(customPx)}px`
+      : cfg.logoSize === "sm"
+      ? "44px"
+      : cfg.logoSize === "lg"
+      ? "84px"
+      : "64px";
   const logoSrc = safeUrl(cfg.logoUrl) || "https://erp.avenautomation.in/assets/logo.png";
   const photoSrc = safeUrl(cfg.profilePhotoUrl);
   const webHref = safeUrl(cfg.website) || "https://avenautomation.in";

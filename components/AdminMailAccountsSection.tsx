@@ -32,7 +32,7 @@ function getTabAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-const ROLES = ["Sales", "Accounts", "Purchase", "Store", "Staff"];
+const ROLES = ["Admin", "Sales", "Accounts", "Purchase", "Store", "Staff"];
 
 export default function AdminMailAccountsSection({
   theme,
@@ -145,6 +145,13 @@ export default function AdminMailAccountsSection({
       subject_value: permSubjectVal,
       revoke,
     };
+    if (!revoke && body.subject_type === "role" && body.subject_value === "Admin") {
+      setNotice({
+        type: "ok",
+        text: "Admin inherently has full access to all mailboxes (no duplicate permission record required).",
+      });
+      return;
+    }
     const res = await fetch("/api/mail/accounts", {
       method: "PUT",
       headers: getTabAuthHeaders(),
@@ -228,7 +235,11 @@ export default function AdminMailAccountsSection({
               <div className={`text-[11px] ${mutedCls}`}>
                 Display: {mbx.display_name} &bull; Last Sync: {mbx.last_sync_at ? new Date(mbx.last_sync_at).toLocaleString() : "Never"}
               </div>
-              {mbx.last_error && <div className="text-[11px] text-rose-400">Error: {mbx.last_error}</div>}
+              {mbx.last_error && (
+                <div className="text-[11px] text-rose-400">
+                  Error: {typeof mbx.last_error === "string" ? mbx.last_error : JSON.stringify(mbx.last_error)}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 shrink-0 text-[11px]">
@@ -340,7 +351,11 @@ export default function AdminMailAccountsSection({
           </select>
           {permSubjectType === "role" ? (
             <select value={permSubjectVal} onChange={(e) => setPermSubjectVal(e.target.value)} className={`px-2.5 py-1.5 rounded border ${inputCls}`}>
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r === "Admin" ? "Admin — Full Access" : r}
+                </option>
+              ))}
             </select>
           ) : (
             <input
