@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { query } from "@/lib/db";
 import { authenticateRequest, logAudit } from "@/lib/auth";
+import { hasPermission, normalizeRole } from "@/lib/permissions";
 import {
   DEFAULT_EMAIL_TEMPLATES,
   parseEmailList,
@@ -47,23 +48,39 @@ export async function GET(req: NextRequest) {
   await ensureDefaultTemplatesSeeded();
 
   try {
+    const isAdmin = normalizeRole(auth.user.role) === "Admin";
     const [historyRes, draftsRes, templatesRes] = await Promise.all([
       query(
-        `SELECT id, quotation_no, document_type, from_email, to_emails, cc_emails, bcc_emails,
-                subject, body_html, attachments, status, error_message, provider_message_id,
-                sent_by, sent_at
-         FROM email_history
-         ORDER BY sent_at DESC
-         LIMIT 100`,
-        []
+        isAdmin
+          ? `SELECT id, quotation_no, document_type, from_email, to_emails, cc_emails, bcc_emails,
+                    subject, body_html, attachments, status, error_message, provider_message_id,
+                    sent_by, sent_at
+             FROM email_history
+             ORDER BY sent_at DESC
+             LIMIT 100`
+          : `SELECT id, quotation_no, document_type, from_email, to_emails, cc_emails, bcc_emails,
+                    subject, body_html, attachments, status, error_message, provider_message_id,
+                    sent_by, sent_at
+             FROM email_history
+             WHERE LOWER(sent_by) = LOWER($1)
+             ORDER BY sent_at DESC
+             LIMIT 100`,
+        isAdmin ? [] : [auth.user.email]
       ),
       query(
-        `SELECT id, quotation_no, document_type, to_emails, cc_emails, bcc_emails,
-                subject, body_html, attachments, updated_by, updated_at
-         FROM email_drafts
-         ORDER BY updated_at DESC
-         LIMIT 50`,
-        []
+        isAdmin
+          ? `SELECT id, quotation_no, document_type, to_emails, cc_emails, bcc_emails,
+                    subject, body_html, attachments, updated_by, updated_at
+             FROM email_drafts
+             ORDER BY updated_at DESC
+             LIMIT 50`
+          : `SELECT id, quotation_no, document_type, to_emails, cc_emails, bcc_emails,
+                    subject, body_html, attachments, updated_by, updated_at
+             FROM email_drafts
+             WHERE LOWER(updated_by) = LOWER($1)
+             ORDER BY updated_at DESC
+             LIMIT 50`,
+        isAdmin ? [] : [auth.user.email]
       ),
       query(
         `SELECT id, name, category, subject_template, body_html, is_default, updated_at
@@ -137,11 +154,54 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate attachments
+    // Validate attachments & enforce document/role authorization
     const rawAttachments = Array.isArray(body.attachments) ? body.attachments : [];
     const mailAttachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
     const attachmentMeta: Array<{ filename: string; contentType: string; sizeBytes: number }> = [];
     let totalBytes = 0;
+
+    const isAdmin = normalizeRole(auth.user.role) === "Admin";
+    const hasPoAtt =
+      String(documentType || "").toLowerCase() === "po" ||
+      rawAttachments.some(
+        (a: any) =>
+          String(a?.docType || "").toLowerCase() === "po" ||
+          /^PO[-_]/i.test(String(a?.filename || ""))
+      );
+    if (hasPoAtt) {
+      if (
+        !isAdmin &&
+        !hasPermission(auth.user, "purchase_order.create") &&
+        !hasPermission(auth.user, "purchase_order.view_own")
+      ) {
+        return NextResponse.json({ error: "Forbidden: Not authorized to attach Purchase Orders." }, { status: 403 });
+      }
+      const poRef = String(
+        quotationNo ||
+          rawAttachments.find((a: any) => a?.quoteRef)?.quoteRef ||
+          ""
+      ).trim();
+      if (!poRef) {
+        return NextResponse.json(
+          { error: "Purchase Order reference is required to verify approval before emailing." },
+          { status: 400 }
+        );
+      }
+      const poRes = await query(
+        `SELECT id, data, approval_status FROM purchase_orders WHERE po_number = $1 OR id = $1 LIMIT 1`,
+        [poRef]
+      ).catch(() =>
+        query(`SELECT id, data FROM purchase_orders WHERE po_number = $1 OR id = $1 LIMIT 1`, [poRef])
+      );
+      const poRow = poRes?.rows[0];
+      const poApproval = String(poRow?.approval_status || poRow?.data?.approval_status || "Draft");
+      if (!poRow || poApproval !== "Approved") {
+        return NextResponse.json(
+          { error: "Admin approval required. Unapproved Purchase Orders cannot be emailed." },
+          { status: 403 }
+        );
+      }
+    }
 
     for (const att of rawAttachments) {
       const filename = String(att?.filename || "document.pdf").replace(/[^\w.\- ()]/g, "_");

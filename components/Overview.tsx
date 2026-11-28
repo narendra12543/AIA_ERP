@@ -41,6 +41,7 @@ interface OverviewProps {
   onNewQuotation: () => void;
   onOpenVendorModal?: () => void;
   onNavigateFinance?: () => void;
+  onOpenPurchaseOrders?: () => void;
   onPrintQuotation?: (q: Quotation) => void;
   onSendEmail?: (q: Quotation) => void;
   onSendWhatsApp?: (q: Quotation) => void;
@@ -59,6 +60,7 @@ export default function Overview({
   onNewQuotation,
   onOpenVendorModal,
   onNavigateFinance,
+  onOpenPurchaseOrders,
   onPrintQuotation,
   onSendEmail,
   onSendWhatsApp,
@@ -70,7 +72,6 @@ export default function Overview({
   const isDark = theme === "dark";
   const { selectedFY, setSelectedFY, currentFY, resetToCurrentFY } = useFinancialYear();
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [revisionFilter, setRevisionFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
   const [pageSize, setPageSize] = useState<number>(25);
@@ -94,27 +95,33 @@ export default function Overview({
       cashBalance: number;
       pendingApprovalsCount?: number;
       pendingApprovalsAmount?: number;
+      pendingPoApprovalsCount?: number;
       purchaseOrdersCount?: number;
     };
+    monthlySeries?: Array<{ month: string; turnover: number; order_total_incl_gst: number; expenses: number }>;
+    outstandingOrders?: Array<{ id: string; order_no: string; client_name: string; order_date: string; total_order_value: number; paid_amount: number; outstanding: number }>;
   } | null>(null);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     const loadFinance = async () => {
       try {
         const res = await fetch(`/api/finance/dashboard?fy=${encodeURIComponent(selectedFY)}`, {
           cache: "no-store",
+          signal: controller.signal,
         });
         if (!res.ok) return;
         const json = await res.json();
-        if (active) setFinanceData(json);
-      } catch {
-        // Non-fatal: Overview falls back to quotation metrics
+        setFinanceData(json);
+      } catch (err: any) {
+        if (err?.name !== "AbortError") {
+          // Non-fatal: Overview falls back to quotation metrics
+        }
       }
     };
     loadFinance();
     return () => {
-      active = false;
+      controller.abort();
     };
   }, [selectedFY]);
 
@@ -138,100 +145,109 @@ export default function Overview({
     return quotations.filter((q) => matchesReportingFY(q.date, q.quotation_no, selectedFY));
   }, [quotations, selectedFY]);
 
+  // Deduplicate logical quotations by base quotation number (latest revision only, excluding deleted/cancelled)
+  const deduplicatedQuotes = useMemo(() => {
+    const map = new Map<string, Quotation>();
+    for (const q of filteredQuotes) {
+      const st = String(q.status || "").trim().toLowerCase();
+      if (st === "cancelled" || st === "deleted") continue;
+      const rawNo = String(q.quotation_no || q.id || "").trim();
+      const baseNo = rawNo.replace(/-R\d+$/i, "").toLowerCase();
+      const existing = map.get(baseNo);
+      if (!existing) {
+        map.set(baseNo, q);
+        continue;
+      }
+      const curRev = Number(q.revision_index || 0);
+      const prevRev = Number(existing.revision_index || 0);
+      if (curRev > prevRev) {
+        map.set(baseNo, q);
+      } else if (curRev === prevRev) {
+        const curTs = new Date((q as any).updated_at || q.date || 0).getTime() || 0;
+        const prevTs = new Date((existing as any).updated_at || existing.date || 0).getTime() || 0;
+        if (curTs >= prevTs) map.set(baseNo, q);
+      }
+    }
+    return Array.from(map.values());
+  }, [filteredQuotes]);
+
   // Real Database Business Metrics (No duplicate counting)
   const metrics = useMemo(() => {
-    let totalBusinessValue = 0; // Total value of commercial proposals
-    let totalInvoiced = 0;      // Value of issued tax invoices & confirmed PIs
-    let totalAdvance = 0;       // Advance payments received
-    let draftCount = 0;
-    let missingGstinCount = 0;
+    let totalQuotationValue = 0; // Total commercial quotation value (Incl. GST), deduplicated by revision
 
-    filteredQuotes.forEach((q) => {
-      const val = Number(q.total || 0);
-      totalBusinessValue += val;
-
-      // Invoiced: has Tax Invoice Number or PI Number
-      if (q.tax_invoice_number || q.pi_number) {
-        totalInvoiced += val;
-      }
-
-      const adv = Number(q.advance_received || 0);
-      totalAdvance += adv;
-
-      if ((q.status || "Draft").toLowerCase() === "draft") {
-        draftCount++;
-      }
-
-      if (!q.client_gstin || q.client_gstin.trim() === "") {
-        missingGstinCount++;
-      }
+    deduplicatedQuotes.forEach((q) => {
+      totalQuotationValue += Number(q.total || 0);
     });
-
-    const outstandingPayments = Math.max(0, totalInvoiced - totalAdvance);
 
     return {
-      totalBusinessValue,
-      totalInvoiced,
-      totalAdvance,
-      outstandingPayments,
-      draftCount,
-      missingGstinCount,
-      totalCount: filteredQuotes.length,
+      totalQuotationValue,
+      totalCount: deduplicatedQuotes.length,
       vendorsCount: vendors.length,
     };
-  }, [filteredQuotes, vendors]);
+  }, [deduplicatedQuotes, vendors]);
 
-  // Monthly Performance Trend (Aggregated dynamically from real DB records)
+  // Monthly Performance Trend (Quotation Value Incl. GST vs. Confirmed Order Value Incl. GST)
   const monthlyData = useMemo(() => {
     const monthNames = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-    const monthTotals: { [key: string]: { quotes: number; invoiced: number; count: number } } = {};
+    const monthTotals: { [key: string]: { quotes: number; orders: number; count: number } } = {};
 
     monthNames.forEach((m) => {
-      monthTotals[m] = { quotes: 0, invoiced: 0, count: 0 };
+      monthTotals[m] = { quotes: 0, orders: 0, count: 0 };
     });
 
-    filteredQuotes.forEach((q) => {
-      if (!q.date) return;
-      const dateObj = new Date(q.date);
-      if (isNaN(dateObj.getTime())) return;
+    const parseMonthIndex = (raw?: string): number | null => {
+      const s = String(raw || "").trim();
+      if (!s) return null;
+      const ddmmyyyy = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+      if (ddmmyyyy) return Number(ddmmyyyy[2]) - 1;
+      const yyyymm = s.match(/^(\d{4})-(\d{2})/);
+      if (yyyymm) return Number(yyyymm[2]) - 1;
+      const dt = new Date(s);
+      return isNaN(dt.getTime()) ? null : dt.getMonth();
+    };
 
-      const mIdx = dateObj.getMonth(); // 0 = Jan, 8 = Sep, 10 = Nov
-      // FY Month mapping (Apr = 0 to Mar = 11)
+    deduplicatedQuotes.forEach((q) => {
+      const mIdx = parseMonthIndex(q.date);
+      if (mIdx === null) return;
       const fyMonthIndex = (mIdx + 9) % 12;
       const mName = monthNames[fyMonthIndex];
-
       if (monthTotals[mName]) {
-        const val = Number(q.total || 0);
-        monthTotals[mName].quotes += val;
+        monthTotals[mName].quotes += Number(q.total || 0);
         monthTotals[mName].count += 1;
-        if (q.tax_invoice_number || q.pi_number) {
-          monthTotals[mName].invoiced += val;
-        }
       }
     });
 
-    // Find max for scaling
+    (financeData?.monthlySeries || []).forEach((row) => {
+      const mIdx = parseMonthIndex(row.month);
+      if (mIdx === null) return;
+      const fyMonthIndex = (mIdx + 9) % 12;
+      const mName = monthNames[fyMonthIndex];
+      if (monthTotals[mName]) {
+        monthTotals[mName].orders += Number(row.order_total_incl_gst || 0);
+      }
+    });
+
     const maxVal = Math.max(
-      1,
-      ...Object.values(monthTotals).map((m) => Math.max(m.quotes, m.invoiced))
+      0,
+      ...Object.values(monthTotals).map((m) => Math.max(m.quotes, m.orders))
     );
+    const scaleMax = maxVal > 0 ? maxVal : 1;
 
     return {
       items: monthNames.map((name) => ({
         month: name,
         ...monthTotals[name],
-        heightQuotesPct: Math.min(100, Math.round((monthTotals[name].quotes / maxVal) * 100)),
-        heightInvoicedPct: Math.min(100, Math.round((monthTotals[name].invoiced / maxVal) * 100)),
+        heightQuotesPct: monthTotals[name].quotes > 0 ? Math.min(100, Math.round((monthTotals[name].quotes / scaleMax) * 100)) : 0,
+        heightOrdersPct: monthTotals[name].orders > 0 ? Math.min(100, Math.round((monthTotals[name].orders / scaleMax) * 100)) : 0,
       })),
       maxVal,
     };
-  }, [filteredQuotes]);
+  }, [deduplicatedQuotes, financeData?.monthlySeries]);
 
-  // All Quotations (Search, Filter, Sort, Paginate — no 6-record limit)
+  // All Quotations (Search, Filter, Sort, Paginate)
   const searchedAndSortedQuotes = useMemo(() => {
     const qLower = searchQuery.trim().toLowerCase();
     const list = filteredQuotes.filter((q) => {
-      if (statusFilter !== "all" && (q.status || "Draft") !== statusFilter) return false;
       const isRev = (q.revision_index && q.revision_index > 0) || /-R\d+$/i.test(q.quotation_no || "");
       if (revisionFilter === "revised" && !isRev) return false;
       if (revisionFilter === "original" && isRev) return false;
@@ -259,7 +275,7 @@ export default function Overview({
       if (sortBy === "amount_asc") return Number(a.total || 0) - Number(b.total || 0);
       return parseFlexibleDateMs(b.date) - parseFlexibleDateMs(a.date);
     });
-  }, [filteredQuotes, searchQuery, statusFilter, revisionFilter, sortBy]);
+  }, [filteredQuotes, searchQuery, revisionFilter, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(searchedAndSortedQuotes.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -268,7 +284,7 @@ export default function Overview({
     return searchedAndSortedQuotes.slice(start, start + pageSize);
   }, [searchedAndSortedQuotes, safePage, pageSize]);
 
-  // Action Items (Real outstanding balances & missing GSTINs)
+  // Action Items (Real Finance & Operations receivables, invoice GSTIN alerts, and Admin PO approvals)
   const actionItems = useMemo(() => {
     const items: Array<{
       id: string;
@@ -276,33 +292,47 @@ export default function Overview({
       client: string;
       desc: string;
       amount?: number;
-      type: "payment" | "gstin" | "draft";
-      quote: Quotation;
+      type: "payment" | "gstin" | "po_approval";
+      quote?: Quotation;
+      actionTarget?: "finance" | "po";
     }> = [];
 
-    filteredQuotes.forEach((q) => {
-      const total = Number(q.total || 0);
-      const adv = Number(q.advance_received || 0);
-      const bal = total - adv;
+    if (currentUser?.role === "Admin" && (financeData?.kpis?.pendingPoApprovalsCount || 0) > 0) {
+      items.push({
+        id: "po_pending_approvals",
+        title: `Pending PO Approvals (${financeData?.kpis?.pendingPoApprovalsCount})`,
+        client: "Purchase Orders",
+        desc: "Submitted supplier Purchase Orders awaiting Admin review",
+        type: "po_approval",
+        actionTarget: "po",
+      });
+    }
 
-      if ((q.tax_invoice_number || q.pi_number) && bal > 0) {
+    (financeData?.outstandingOrders || []).forEach((ord) => {
+      if (items.length >= 4) return;
+      const bal = Number(ord.outstanding || 0);
+      if (bal > 0) {
         items.push({
-          id: `pay_${q.id}`,
-          title: `Pending Balance: ${q.quotation_no}`,
-          client: q.client_name,
-          desc: `Adv: ${inr.format(adv)} / Total: ${inr.format(total)}`,
+          id: `fin_ord_${ord.id}`,
+          title: `Pending Balance: ${ord.order_no}`,
+          client: ord.client_name,
+          desc: `${ord.client_name} • Paid: ${inr.format(Number(ord.paid_amount || 0))} / ${inr.format(Number(ord.total_order_value || 0))}`,
           amount: bal,
           type: "payment",
-          quote: q,
+          actionTarget: "finance",
         });
       }
+    });
 
-      if ((!q.client_gstin || q.client_gstin.trim() === "") && items.length < 5) {
+    filteredQuotes.forEach((q) => {
+      if (items.length >= 4) return;
+      const hasInvoiceWorkflow = Boolean(q.tax_invoice_number && q.tax_invoice_number.trim() !== "");
+      if (hasInvoiceWorkflow && (!q.client_gstin || q.client_gstin.trim() === "")) {
         items.push({
           id: `gst_${q.id}`,
           title: `Missing GSTIN: ${q.client_name}`,
           client: q.quotation_no,
-          desc: "Required for statutory Tax Invoice export",
+          desc: `Required for Tax Invoice ${q.tax_invoice_number}`,
           type: "gstin",
           quote: q,
         });
@@ -310,7 +340,7 @@ export default function Overview({
     });
 
     return items.slice(0, 4);
-  }, [filteredQuotes]);
+  }, [currentUser?.role, financeData?.kpis?.pendingPoApprovalsCount, financeData?.outstandingOrders, filteredQuotes]);
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
@@ -367,91 +397,67 @@ export default function Overview({
         </div>
       </div>
 
-      {/* 2. 4-Column Enterprise KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Total Turnover (Excl. GST) / Pipeline */}
-        <div className={`p-4 rounded-lg border ${cardBg}`}>
+      {/* 2. 4-Column Enterprise KPI Cards (Exact Required Order) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* KPI 1: Total Quotation Value (Incl. GST, deduplicated by latest revision) */}
+        <div className={`p-4 rounded-lg border min-w-0 ${cardBg}`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-[12px] font-medium ${textMuted}`}>
-              {financeData?.kpis ? "Total Turnover (Excl. GST)" : "Total Business Value"}
-            </span>
-            <TrendingUp className={`w-4 h-4 ${textMuted}`} />
+            <span className={`text-[12px] font-medium ${textMuted}`}>Total Quotation Value</span>
+            <FileText className={`w-4 h-4 shrink-0 ${textMuted}`} />
           </div>
-          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${textHeader}`}>
-            {inr
-              .format(financeData?.kpis ? financeData.kpis.basicTurnover : metrics.totalBusinessValue)
-              .replace(/\.00$/, "")}
+          <div className={`text-[20px] sm:text-[22px] font-semibold tabular-nums tracking-tight break-words ${textHeader}`}>
+            {inr.format(metrics.totalQuotationValue).replace(/\.00$/, "")}
           </div>
-          <p className={`text-[11px] ${textMuted} mt-1.5`}>
-            {financeData?.kpis
-              ? `${financeData.kpis.convertedOrders} Confirmed Orders • Pipeline ${inr.format(metrics.totalBusinessValue).replace(/\.00$/, "")}`
-              : `${metrics.totalCount} Proposals in pipeline`}
+          <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
+            {metrics.totalCount} Quotations &bull; Incl. GST
           </p>
         </div>
 
-        {/* KPI 2: Outstanding Payments */}
-        <div className={`p-4 rounded-lg border ${cardBg}`}>
+        {/* KPI 2: Total Turnover (Excl. GST) */}
+        <div className={`p-4 rounded-lg border min-w-0 ${cardBg}`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-[12px] font-medium ${textMuted}`}>Outstanding Receivables</span>
-            <AlertCircle className={`w-4 h-4 ${textMuted}`} />
+            <span className={`text-[12px] font-medium ${textMuted}`}>Total Turnover (Excl. GST)</span>
+            <TrendingUp className={`w-4 h-4 shrink-0 ${textMuted}`} />
           </div>
-          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : metrics.outstandingPayments) > 0 ? "text-rose-500" : textHeader}`}>
-            {inr
-              .format(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : metrics.outstandingPayments)
-              .replace(/\.00$/, "")}
+          <div className={`text-[20px] sm:text-[22px] font-semibold tabular-nums tracking-tight break-words ${textHeader}`}>
+            {inr.format(financeData?.kpis ? financeData.kpis.basicTurnover : 0).replace(/\.00$/, "")}
           </div>
           <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
-            Received: {inr.format(financeData?.kpis ? financeData.kpis.customerReceived : metrics.totalAdvance).replace(/\.00$/, "")}
+            {financeData?.kpis
+              ? `${financeData.kpis.convertedOrders} Confirmed Orders`
+              : "Finance & Operations Turnover"}
+          </p>
+        </div>
+
+        {/* KPI 3: Outstanding Receivables */}
+        <div className={`p-4 rounded-lg border min-w-0 ${cardBg}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[12px] font-medium ${textMuted}`}>Outstanding Receivables</span>
+            <AlertCircle className={`w-4 h-4 shrink-0 ${textMuted}`} />
+          </div>
+          <div className={`text-[20px] sm:text-[22px] font-semibold tabular-nums tracking-tight break-words ${(financeData?.kpis?.selectedFYOutstanding || 0) > 0 ? "text-rose-500" : textHeader}`}>
+            {inr.format(financeData?.kpis ? financeData.kpis.selectedFYOutstanding : 0).replace(/\.00$/, "")}
+          </div>
+          <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
+            Received: {inr.format(financeData?.kpis ? financeData.kpis.customerReceived : 0).replace(/\.00$/, "")}
             {financeData?.kpis && selectedFY !== "ALL"
               ? ` • Lifetime: ${inr.format(financeData.kpis.lifetimeOutstanding).replace(/\.00$/, "")}`
               : ""}
           </p>
         </div>
 
-        {/* KPI 3: Net Profit / Total Invoiced */}
-        <div className={`p-4 rounded-lg border ${cardBg}`}>
+        {/* KPI 4: Net Profit */}
+        <div className={`p-4 rounded-lg border min-w-0 ${cardBg}`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-[12px] font-medium ${textMuted}`}>
-              {financeData?.kpis ? "Net Profit" : "Total Invoiced"}
-            </span>
-            {financeData?.kpis ? <Wallet className={`w-4 h-4 ${textMuted}`} /> : <Receipt className={`w-4 h-4 ${textMuted}`} />}
+            <span className={`text-[12px] font-medium ${textMuted}`}>Net Profit</span>
+            <Wallet className={`w-4 h-4 shrink-0 ${textMuted}`} />
           </div>
-          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${financeData?.kpis && financeData.kpis.netProfit < 0 ? "text-rose-500" : textHeader}`}>
-            {inr
-              .format(financeData?.kpis ? financeData.kpis.netProfit : metrics.totalInvoiced)
-              .replace(/\.00$/, "")}
+          <div className={`text-[20px] sm:text-[22px] font-semibold tabular-nums tracking-tight break-words ${financeData?.kpis && financeData.kpis.netProfit < 0 ? "text-rose-500" : textHeader}`}>
+            {inr.format(financeData?.kpis ? financeData.kpis.netProfit : 0).replace(/\.00$/, "")}
           </div>
           <p className={`text-[11px] ${textMuted} mt-1.5 tabular-nums`}>
-            {financeData?.kpis
-              ? `Expenses: ${inr.format(financeData.kpis.operatingExpenses).replace(/\.00$/, "")}`
-              : "Issued via Tax Invoices & PIs"}
+            Expenses: {inr.format(financeData?.kpis ? financeData.kpis.operatingExpenses : 0).replace(/\.00$/, "")}
           </p>
-        </div>
-
-        {/* KPI 4: Active Purchase Orders & Vendors */}
-        <div className={`p-4 rounded-lg border ${cardBg}`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-[12px] font-medium ${textMuted}`}>Purchase Order Vendors</span>
-            <Building2 className={`w-4 h-4 ${textMuted}`} />
-          </div>
-          <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${textHeader}`}>
-            {metrics.vendorsCount} <span className={`text-[13px] font-normal ${textMuted}`}>Vendors</span>
-          </div>
-          <div className="mt-1.5 flex items-center justify-between">
-            <span className={`text-[11px] ${textMuted}`}>
-              {financeData?.kpis?.pendingApprovalsCount
-                ? `${financeData.kpis.pendingApprovalsCount} Pending Approvals`
-                : "Registered Suppliers"}
-            </span>
-            {onOpenVendorModal && (
-              <button
-                onClick={onOpenVendorModal}
-                className="text-[11px] text-amber-500 hover:text-amber-400 font-medium flex items-center gap-0.5 cursor-pointer"
-              >
-                Manage &rarr;
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -498,18 +504,18 @@ export default function Overview({
                 <span>Monthly Business Performance</span>
               </h2>
               <p className={`text-[11px] mt-0.5 ${textMuted}`}>
-                Proposals pipeline vs. Invoiced billing based on stored database records
+                Quotation Value (Incl. GST) vs. Confirmed Order Value (Incl. GST)
               </p>
             </div>
 
-            <div className="flex items-center gap-4 text-[11px]">
+            <div className="flex flex-wrap items-center gap-4 text-[11px]">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-amber-500"></span>
-                <span className="text-zinc-300">Proposals (₹)</span>
+                <span className={isDark ? "text-zinc-300" : "text-zinc-700"}>Quotation Value (₹)</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>
-                <span className="text-zinc-300">Invoiced (₹)</span>
+                <span className={isDark ? "text-zinc-300" : "text-zinc-700"}>Confirmed Order Value (₹)</span>
               </div>
             </div>
           </div>
@@ -520,17 +526,17 @@ export default function Overview({
               {monthlyData.items.map((m, idx) => (
                 <div key={idx} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group">
                   <div className="w-full flex items-end justify-center gap-0.5 sm:gap-1 h-full">
-                    {/* Proposal Bar */}
+                    {/* Quotation Value Bar */}
                     <div
-                      style={{ height: `${Math.max(4, m.heightQuotesPct)}%` }}
+                      style={{ height: `${m.heightQuotesPct}%` }}
                       className="w-1/2 max-w-[18px] bg-amber-500/80 hover:bg-amber-400 rounded-t-xs transition-all relative group"
-                      title={`${m.month}: ${inr.format(m.quotes)} (${m.count} quotes)`}
+                      title={`${m.month} Quotations: ${inr.format(m.quotes)} (${m.count} quotes)`}
                     ></div>
-                    {/* Invoiced Bar */}
+                    {/* Confirmed Order Value Bar */}
                     <div
-                      style={{ height: `${Math.max(4, m.heightInvoicedPct)}%` }}
+                      style={{ height: `${m.heightOrdersPct}%` }}
                       className="w-1/2 max-w-[18px] bg-emerald-500/80 hover:bg-emerald-400 rounded-t-xs transition-all"
-                      title={`${m.month} Invoiced: ${inr.format(m.invoiced)}`}
+                      title={`${m.month} Confirmed Orders: ${inr.format(m.orders)}`}
                     ></div>
                   </div>
                   <span className="text-[10px] font-semibold text-zinc-400 mt-1 uppercase">
@@ -540,9 +546,9 @@ export default function Overview({
               ))}
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-3">
-              <span>Peak Monthly Volume: <strong className="text-white font-mono">{inr.format(monthlyData.maxVal)}</strong></span>
-              <span className="text-emerald-400 font-semibold">&bull; Active Intra/Inter-state GST Billing</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] text-zinc-400 pt-3">
+              <span>Peak Monthly Volume: <strong className={`${textHeader} font-mono`}>{inr.format(monthlyData.maxVal)}</strong></span>
+              <span className={textMuted}>Issued Tax Invoice series omitted (no separate issued invoice table)</span>
             </div>
           </div>
         </div>
@@ -564,14 +570,18 @@ export default function Overview({
               {actionItems.length === 0 ? (
                 <div className="text-center py-8">
                   <CheckCircle2 className="w-6 h-6 text-emerald-400 mx-auto mb-1.5 opacity-80" />
-                  <p className="text-xs text-zinc-300 font-medium">All accounts reconciled</p>
-                  <p className="text-[10px] text-zinc-500">No overdue payments or missing statutory fields</p>
+                  <p className={`text-xs font-medium ${textHeader}`}>All accounts reconciled</p>
+                  <p className="text-[10px] text-zinc-500">No overdue receivables, PO approvals, or missing invoice GSTINs</p>
                 </div>
               ) : (
                 actionItems.map((item) => (
                   <div
                     key={item.id}
-                    onClick={() => onOpenQuotation(item.quote)}
+                    onClick={() => {
+                      if (item.actionTarget === "po" && onOpenPurchaseOrders) onOpenPurchaseOrders();
+                      else if (item.actionTarget === "finance" && onNavigateFinance) onNavigateFinance();
+                      else if (item.quote) onOpenQuotation(item.quote);
+                    }}
                     className={`p-2.5 rounded-lg border transition cursor-pointer flex items-center justify-between gap-2.5 ${subCardBg} ${rowHover}`}
                   >
                     <div className="min-w-0">
@@ -588,7 +598,7 @@ export default function Overview({
                       </span>
                     ) : (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-amber-400 border border-zinc-700 shrink-0">
-                        Fix
+                        {item.type === "po_approval" ? "Review" : "Fix"}
                       </span>
                     )}
                   </div>
@@ -628,7 +638,7 @@ export default function Overview({
         </div>
 
         {/* Search, Filter & Sort Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
           <div className="relative lg:col-span-2">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
@@ -639,28 +649,11 @@ export default function Overview({
                 setCurrentPage(1);
               }}
               placeholder="Search quote no, client, product, subject..."
-              className={`w-full pl-8 pr-3 py-2 rounded-lg border min-h-[38px] ${
+              className={`w-full pl-8 pr-3 py-2 rounded-lg border min-h-[40px] ${
                 isDark ? "bg-black border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
               }`}
             />
           </div>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
-              isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
-            }`}
-          >
-            <option value="all">All Statuses</option>
-            <option value="Draft">Draft</option>
-            <option value="Sent">Sent</option>
-            <option value="Accepted">Accepted</option>
-            <option value="Rejected">Rejected</option>
-          </select>
 
           <select
             value={revisionFilter}
@@ -668,7 +661,7 @@ export default function Overview({
               setRevisionFilter(e.target.value);
               setCurrentPage(1);
             }}
-            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
+            className={`px-2.5 py-2 rounded-lg border min-h-[40px] ${
               isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
             }`}
           >
@@ -680,7 +673,7 @@ export default function Overview({
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className={`px-2.5 py-2 rounded-lg border min-h-[38px] ${
+            className={`px-2.5 py-2 rounded-lg border min-h-[40px] ${
               isDark ? "bg-black border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
             }`}
           >
@@ -693,14 +686,13 @@ export default function Overview({
 
         {/* Desktop Table */}
         <div className={`hidden md:block border rounded-lg overflow-x-auto w-full ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
-          <table className="w-full min-w-[780px] text-xs text-left">
+          <table className="w-full min-w-[720px] text-xs text-left">
             <thead className={`${isDark ? "bg-zinc-950/60 border-zinc-800 text-zinc-400" : "bg-zinc-100 border-zinc-200 text-zinc-600"} border-b uppercase text-[10px] font-bold`}>
               <tr>
                 <th className="py-2.5 px-3 whitespace-nowrap">Quotation No</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
                 <th className="py-2.5 px-3">Client Company</th>
                 <th className="py-2.5 px-3">Product / Subject</th>
-                <th className="py-2.5 px-3 text-center">Status</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Amount (₹)</th>
                 <th className="py-2.5 px-3 text-center">Docs</th>
                 <th className={`py-2.5 px-3 text-right sticky right-0 z-10 ${isDark ? "bg-zinc-950" : "bg-zinc-100"} shadow-[-8px_0_12px_-6px_rgba(0,0,0,0.35)]`}>Actions</th>
@@ -709,7 +701,7 @@ export default function Overview({
             <tbody className={`divide-y ${isDark ? "divide-zinc-800/70" : "divide-zinc-200"}`}>
               {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className={`py-8 text-center ${textMuted}`}>
+                  <td colSpan={7} className={`py-8 text-center ${textMuted}`}>
                     No quotations match your current search or filter criteria.
                   </td>
                 </tr>
@@ -734,11 +726,6 @@ export default function Overview({
                     </td>
                     <td className={`py-2.5 px-3 truncate max-w-[190px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
                       {q.product_type || q.subject || "-"}
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/60 bg-zinc-800/40 text-zinc-300">
-                        {q.status || "Draft"}
-                      </span>
                     </td>
                     <td className={`py-2.5 px-3 text-right font-mono font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
                       {inr.format(q.total || 0)}
@@ -837,10 +824,7 @@ export default function Overview({
                 <div className={`text-[11px] truncate ${textMuted}`}>
                   {q.product_type || q.subject || "-"}
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
-                  <Badge variant={q.status === "Accepted" ? "success" : q.status === "Sent" ? "info" : "secondary"}>
-                    {q.status || "Draft"}
-                  </Badge>
+                <div className="flex items-center justify-end pt-2 border-t border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => onOpenQuotation(q)}

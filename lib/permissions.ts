@@ -1,6 +1,6 @@
 import { User } from "./types";
 
-export type CanonicalRole = "Admin" | "Sales" | "Accounts" | "Staff";
+export type CanonicalRole = "Admin" | "Sales" | "Accounts" | "Purchase" | "Store" | "Staff";
 
 export type PermissionKey =
   | "overview.view"
@@ -14,6 +14,10 @@ export type PermissionKey =
   | "proforma.create"
   | "tax_invoice.create"
   | "purchase_order.create"
+  | "purchase_order.view_all"
+  | "purchase_order.view_own"
+  | "purchase_order.submit"
+  | "purchase_order.approve"
   | "clients.view"
   | "clients.add"
   | "clients.edit"
@@ -81,7 +85,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     items: [
       { key: "proforma.create", label: "Proforma Invoices", description: "Generate and export Proforma Invoices (PI)" },
       { key: "tax_invoice.create", label: "Tax Invoices", description: "Generate and export Tax Invoices (TI)" },
-      { key: "purchase_order.create", label: "Purchase Orders", description: "Create and export Purchase Orders (PO)" },
+      { key: "purchase_order.create", label: "Purchase Orders", description: "Create and edit Purchase Order drafts" },
+      { key: "purchase_order.view_all", label: "View All Purchase Orders", description: "View all supplier Purchase Orders" },
+      { key: "purchase_order.view_own", label: "View Own Purchase Orders", description: "View Purchase Orders created by the user" },
+      { key: "purchase_order.submit", label: "Submit Purchase Orders", description: "Submit Purchase Orders for Admin approval" },
+      { key: "purchase_order.approve", label: "Approve Purchase Orders", description: "Approve, reject, or request changes on Purchase Orders" },
     ],
   },
   {
@@ -195,9 +203,44 @@ export const DEFAULT_ACCOUNTS_PERMISSIONS: PermissionKey[] = [
   "expenses.create",
   "expenses.export",
   "clients.view",
+  "mail.view",
+  "mail.compose",
+  "mail.send",
+  "mail.sent_view",
+];
+
+export const DEFAULT_PURCHASE_PERMISSIONS: PermissionKey[] = [
+  "purchase_order.create",
+  "purchase_order.view_own",
+  "purchase_order.submit",
+  "quotations.export", // Required by locked /api/export-pdf renderer; non-PO exports are blocked for Purchase in authorize-export
+  "vendors.view",
+  "vendors.add",
+  "vendors.edit",
+  "mail.view",
+  "mail.compose",
+  "mail.send",
+  "mail.sent_view",
+  "expenses.submit",
+  "expenses.view_own",
+  "expenses.create",
+];
+
+export const DEFAULT_STORE_PERMISSIONS: PermissionKey[] = [
+  "mail.view",
+  "mail.compose",
+  "mail.send",
+  "mail.sent_view",
+  "expenses.submit",
+  "expenses.view_own",
+  "expenses.create",
 ];
 
 export const DEFAULT_STAFF_PERMISSIONS: PermissionKey[] = [
+  "mail.view",
+  "mail.compose",
+  "mail.send",
+  "mail.sent_view",
   "expenses.submit",
   "expenses.view_own",
   "expenses.create",
@@ -208,6 +251,8 @@ export function normalizeRole(role?: string | null): CanonicalRole {
   if (r === "admin") return "Admin";
   if (r === "sales") return "Sales";
   if (r === "accounts") return "Accounts";
+  if (r === "purchase") return "Purchase";
+  if (r === "store") return "Store";
   return "Staff";
 }
 
@@ -216,6 +261,8 @@ export function getDefaultPermissionsForRole(role?: string | null): PermissionKe
   if (canon === "Admin") return ALL_PERMISSIONS;
   if (canon === "Sales") return DEFAULT_SALES_PERMISSIONS;
   if (canon === "Accounts") return DEFAULT_ACCOUNTS_PERMISSIONS;
+  if (canon === "Purchase") return DEFAULT_PURCHASE_PERMISSIONS;
+  if (canon === "Store") return DEFAULT_STORE_PERMISSIONS;
   return DEFAULT_STAFF_PERMISSIONS;
 }
 

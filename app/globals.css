@@ -88,27 +88,6 @@
   transition: background-color 5000s ease-in-out 0s;
 }
 
-/* Isolate protected document previews & exports: enforce pure black (#000000) text without touching protected files */
-.a4-sheet {
-  background-color: #ffffff;
-  color: #000000 !important;
-}
-.a4-sheet * {
-  color: #000000 !important;
-}
-.a4-sheet [class*="bg-[#0f"],
-.a4-sheet [class*="bg-[#0f"] *,
-.a4-sheet [class*="bg-slate-9"],
-.a4-sheet [class*="bg-slate-9"] *,
-.a4-sheet [class*="bg-zinc-9"],
-.a4-sheet [class*="bg-zinc-9"] *,
-.a4-sheet .bg-black,
-.a4-sheet .bg-black *,
-.a4-sheet .text-white,
-.a4-sheet .text-white * {
-  color: #ffffff !important;
-}
-
 .aven-autofill-light:-webkit-autofill,
 .aven-autofill-light:-webkit-autofill:hover,
 .aven-autofill-light:-webkit-autofill:focus {
